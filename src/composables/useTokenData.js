@@ -1,4 +1,4 @@
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 
 export function useTokenData() {
   const overview = ref(null);
@@ -19,11 +19,59 @@ export function useTokenData() {
         if (saved) return saved;
       }
     } catch {}
-    return '/home/ellol/apps/agent-token-tracker';
+    return 'all';
   };
 
   const activeWorkspace = ref(getSavedWorkspace());
   const isAutoRefresh = ref(true);
+
+  const filteredSessions = computed(() => {
+    if (!activeWorkspace.value || activeWorkspace.value === 'all') {
+      return sessions.value;
+    }
+    const target = activeWorkspace.value.toLowerCase().replace(/[\/\\]+$/, '');
+    return sessions.value.filter(s => {
+      const cwd = (s.meta?.cwd || '').toLowerCase().replace(/[\/\\]+$/, '');
+      return cwd.startsWith(target) || target.startsWith(cwd);
+    });
+  });
+
+  const filteredOverview = computed(() => {
+    const list = filteredSessions.value;
+    if (!list.length) {
+      return {
+        totalTokens: 0,
+        totalSessions: 0,
+        averageCacheHitRate: 0,
+        totalReasoningTokens: 0,
+        estimatedCostSaved: 0
+      };
+    }
+
+    let totalTokens = 0;
+    let totalInput = 0;
+    let totalCached = 0;
+    let totalReasoning = 0;
+
+    for (const s of list) {
+      const usage = s.totalUsage || {};
+      totalTokens += (usage.total_tokens || 0);
+      totalInput += (usage.input_tokens || 0);
+      totalCached += (usage.cached_input_tokens || 0);
+      totalReasoning += (usage.reasoning_output_tokens || 0);
+    }
+
+    const rate = totalInput > 0 ? Math.round((totalCached / totalInput) * 100) : 0;
+    const saved = (totalCached / 1000000) * 2.00;
+
+    return {
+      totalTokens,
+      totalSessions: list.length,
+      averageCacheHitRate: rate,
+      totalReasoningTokens: totalReasoning,
+      estimatedCostSaved: parseFloat(saved.toFixed(2))
+    };
+  });
 
   let pollTimer = null;
 
@@ -140,7 +188,9 @@ export function useTokenData() {
 
   return {
     overview,
+    filteredOverview,
     sessions,
+    filteredSessions,
     pacingForecast,
     glossary,
     projects,

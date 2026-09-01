@@ -157,15 +157,31 @@ export function getGuidanceRecordsForProject(projectPath = null) {
 }
 
 /**
+ * Finds the canonical project root (resolving subfolders to the Git repository root)
+ */
+export function findProjectRoot(startDir) {
+  if (!startDir) return '/home/ellol/apps/agent-token-tracker';
+  let curr = path.resolve(startDir);
+  const stopDir = '/home/ellol';
+  while (curr && curr !== stopDir && curr !== '/') {
+    if (fs.existsSync(path.join(curr, '.git'))) {
+      return curr;
+    }
+    curr = path.dirname(curr);
+  }
+  return path.resolve(startDir);
+}
+
+/**
  * Discovers tracked projects from active sessions and predefined locations
  */
 export async function getTrackedProjects() {
   const projectMap = new Map();
 
-  // Known default projects (active project first)
+  // Known default projects
   const defaults = [
-    { path: '/home/ellol/apps/agent-token-tracker', name: 'agent-token-tracker', description: 'Agent Token Tracker (Vue 3, Express)', isDefault: true },
-    { path: '/home/ellol/solutions/clinic-platform', name: 'clinic-platform', description: 'Clinic Monorepo (NestJS, React, Prisma)', isDefault: true }
+    { path: '/home/ellol/apps/agent-token-tracker', name: 'agent-token-tracker', description: 'Agent Token Tracker (Vue 3, Express)', isDefault: true, sessionCount: 0 },
+    { path: '/home/ellol/solutions/clinic-platform', name: 'clinic-platform', description: 'Clinic Monorepo (NestJS, React, Prisma)', isDefault: true, sessionCount: 0 }
   ];
 
   for (const def of defaults) {
@@ -174,7 +190,8 @@ export async function getTrackedProjects() {
         path: def.path,
         name: def.name,
         description: def.description,
-        isDefault: true
+        isDefault: true,
+        sessionCount: 0
       });
     }
   }
@@ -184,14 +201,20 @@ export async function getTrackedProjects() {
     for (const session of sessions) {
       const cwd = session.meta?.cwd;
       if (cwd && fs.existsSync(cwd)) {
-        const key = normalizeDir(cwd);
+        const canonicalRoot = findProjectRoot(cwd);
+        const key = normalizeDir(canonicalRoot);
+
         if (!projectMap.has(key)) {
           projectMap.set(key, {
-            path: cwd,
-            name: path.basename(cwd),
-            description: `Discovered from Session ${session.sessionId.substring(0, 8)}`,
-            isDefault: false
+            path: canonicalRoot,
+            name: path.basename(canonicalRoot),
+            description: `Auto-discovered workspace (${path.basename(canonicalRoot)})`,
+            isDefault: false,
+            sessionCount: 1
           });
+        } else {
+          const item = projectMap.get(key);
+          item.sessionCount = (item.sessionCount || 0) + 1;
         }
       }
     }

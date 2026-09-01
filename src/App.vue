@@ -18,7 +18,9 @@ import GuidanceRecordsModal from './components/GuidanceRecordsModal.vue';
 
 const {
   overview,
+  filteredOverview,
   sessions,
+  filteredSessions,
   pacingForecast,
   glossary,
   projects,
@@ -63,13 +65,13 @@ function handleWorkspaceChange(newPath) {
   setWorkspace(newPath);
 }
 
-async function handleRollback(backupId) {
-  await undoLastAction(backupId);
-  await fetchGuidanceRecords(activeWorkspace.value);
+async function handleAddGuidanceRecord(recordData) {
+  await addGuidanceRecord(recordData);
 }
 
-async function handleAddGuidanceRecord(data) {
-  await addGuidanceRecord(data);
+async function handleRollback(backupId) {
+  await undoLastAction(backupId);
+  fetchGuidanceRecords();
 }
 </script>
 
@@ -98,14 +100,14 @@ async function handleAddGuidanceRecord(data) {
       />
 
       <!-- Top Summary Metrics Cards with Inline Time Filters -->
-      <MetricsOverview :overview="overview" :sessions="sessions" />
+      <MetricsOverview :overview="filteredOverview" :sessions="filteredSessions" />
 
       <!-- Interactive Analytics & Burn Charts -->
-      <TokenBurnChart :overview="overview" :sessions="sessions" />
+      <TokenBurnChart :overview="filteredOverview" :sessions="filteredSessions" />
 
       <!-- Centerpiece: Guided Optimization Advisor (Section-Scoped What-If Simulator & Actions) -->
       <GuidedOptimizer 
-        :all-sessions="sessions"
+        :all-sessions="filteredSessions"
         :active-workspace="activeWorkspace"
         @open-handoff="isHandoffOpen = true"
         @open-skill-gen="isSkillGenOpen = true"
@@ -114,7 +116,7 @@ async function handleAddGuidanceRecord(data) {
 
       <!-- Session Explorer Table -->
       <SessionList 
-        :sessions="sessions" 
+        :sessions="filteredSessions" 
         @inspect-session="handleInspect"
       />
     </main>

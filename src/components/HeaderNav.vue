@@ -47,26 +47,27 @@ function onSelectProject(e) {
 
       <!-- Project Selector Pill -->
       <div class="workspace-pill">
-        <span class="pill-label">Project:</span>
+        <span class="pill-label">Scope:</span>
         <select 
           :value="activeWorkspace" 
           class="project-select-inline mono"
           @change="onSelectProject"
         >
+          <option value="all">🌐 All Projects (All Sessions)</option>
           <option 
             v-for="p in projects" 
             :key="p.path" 
             :value="p.path"
           >
-            {{ p.name }} ({{ p.path }})
+            📁 {{ p.name }} {{ p.sessionCount ? `(${p.sessionCount} sessions)` : '' }}
           </option>
-          <option v-if="!projects.some(p => p.path === activeWorkspace)" :value="activeWorkspace">
-            {{ activeWorkspace }}
+          <option v-if="activeWorkspace !== 'all' && !projects.some(p => p.path === activeWorkspace)" :value="activeWorkspace">
+            📁 {{ activeWorkspace }}
           </option>
         </select>
         <Tooltip 
           title="Tracked Project Scope" 
-          text="Switch between active workspaces. Recommendations, guidance records, and skills are scoped to the selected project." 
+          text="Filters metrics, sessions, recommendations, and token issues to the selected repository." 
         />
       </div>
     </div>
