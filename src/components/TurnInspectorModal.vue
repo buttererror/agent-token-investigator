@@ -9,6 +9,18 @@ defineProps({
 });
 
 defineEmits(['close', 'export-handoff']);
+
+function formatToolArg(input) {
+  if (!input) return '';
+  if (typeof input === 'string') return input.substring(0, 80);
+  if (typeof input === 'object') {
+    if (input.cmd) return String(input.cmd).substring(0, 80);
+    if (input.AbsolutePath) return String(input.AbsolutePath);
+    if (input.command) return String(input.command).substring(0, 80);
+    return JSON.stringify(input).substring(0, 80);
+  }
+  return String(input).substring(0, 80);
+}
 </script>
 
 <template>
@@ -17,8 +29,8 @@ defineEmits(['close', 'export-handoff']);
       <div class="modal-head">
         <div class="head-info">
           <h3>🔍 Turn-by-Turn Session Inspector</h3>
-          <span class="session-name-lg">{{ session.threadName }}</span>
-          <span class="session-path mono text-dim text-xs">{{ session.meta.cwd }} • {{ session.sessionId }}</span>
+          <span class="session-name-lg">{{ session?.threadName || 'Session Details' }}</span>
+          <span class="session-path mono text-dim text-xs">{{ session?.meta?.cwd || '' }} • {{ session?.sessionId }}</span>
         </div>
         <div class="head-actions">
           <button 
@@ -35,26 +47,26 @@ defineEmits(['close', 'export-handoff']);
       <div class="stats-summary-bar">
         <div class="summary-item">
           <span class="lbl">Total Turns:</span>
-          <span class="val mono">{{ session.turnCount }}</span>
+          <span class="val mono">{{ session?.turnCount || 0 }}</span>
         </div>
         <div class="summary-item">
           <span class="lbl">Total Tokens:</span>
-          <span class="val mono">{{ (session.totalUsage.total_tokens || 0).toLocaleString() }}</span>
+          <span class="val mono">{{ (session?.totalUsage?.total_tokens || 0).toLocaleString() }}</span>
         </div>
         <div class="summary-item">
           <span class="lbl">Cached Input:</span>
-          <span class="val mono text-green">{{ (session.totalUsage.cached_input_tokens || 0).toLocaleString() }}</span>
+          <span class="val mono text-green">{{ (session?.totalUsage?.cached_input_tokens || 0).toLocaleString() }}</span>
         </div>
         <div class="summary-item">
           <span class="lbl">Reasoning:</span>
-          <span class="val mono text-purple">{{ (session.totalUsage.reasoning_output_tokens || 0).toLocaleString() }}</span>
+          <span class="val mono text-purple">{{ (session?.totalUsage?.reasoning_output_tokens || 0).toLocaleString() }}</span>
         </div>
       </div>
 
       <!-- Turns Timeline -->
       <div class="turns-timeline">
         <div 
-          v-for="turn in session.turns" 
+          v-for="turn in (session?.turns || [])" 
           :key="turn.turnNumber"
           :class="['turn-box', { 'has-spike': turn.noiseSpikes?.length > 0 }]"
         >
@@ -96,8 +108,7 @@ defineEmits(['close', 'export-handoff']);
             <div class="tools-list">
               <div v-for="(tc, i) in turn.toolCalls" :key="i" class="tool-pill mono">
                 <span class="tool-name">🔧 {{ tc.tool }}</span>
-                <span v-if="tc.input?.cmd" class="tool-arg">{{ tc.input.cmd.substring(0, 70) }}...</span>
-                <span v-else-if="tc.input?.AbsolutePath" class="tool-arg">{{ tc.input.AbsolutePath }}</span>
+                <span class="tool-arg">{{ formatToolArg(tc.input) }}</span>
               </div>
             </div>
           </div>
@@ -105,8 +116,12 @@ defineEmits(['close', 'export-handoff']);
           <!-- Assistant Message Preview -->
           <div v-if="turn.assistantMessage" class="assistant-section">
             <div class="section-label">Assistant Response:</div>
-            <div class="assistant-preview mono">{{ turn.assistantMessage.substring(0, 240) }}...</div>
+            <div class="assistant-preview mono">{{ String(turn.assistantMessage).substring(0, 240) }}...</div>
           </div>
+        </div>
+
+        <div v-if="!session?.turns || session.turns.length === 0" class="empty-state">
+          No turn details recorded for this session.
         </div>
       </div>
     </div>
@@ -288,6 +303,13 @@ defineEmits(['close', 'export-handoff']);
   background-color: rgba(0,0,0,0.2);
   padding: 8px 10px;
   border-radius: 6px;
+}
+
+.empty-state {
+  text-align: center;
+  color: var(--text-dim);
+  padding: 40px 0;
+  font-size: 0.9rem;
 }
 
 .text-xs { font-size: 0.72rem; }
