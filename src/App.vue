@@ -162,11 +162,13 @@ onMounted(() => {
       <GuidedOptimizer 
         :all-sessions="filteredSessions"
         :active-workspace="activeWorkspace"
+        :active-agent="activeAgent"
         @open-handoff="isHandoffOpen = true"
         @open-skill-gen="isSkillGenOpen = true"
         @open-linter="isLinterOpen = true"
         @issue-generated="() => fetchIssuesCount(activeWorkspace)"
       />
+
 
       <!-- Actionable Session List & Turn Inspector -->
       <SessionList 

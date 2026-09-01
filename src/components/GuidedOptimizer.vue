@@ -11,6 +11,10 @@ const props = defineProps({
   activeWorkspace: {
     type: String,
     required: true
+  },
+  activeAgent: {
+    type: String,
+    default: 'codex'
   }
 });
 
@@ -56,7 +60,9 @@ async function fetchLocalDiagnostics(
   try {
     const params = new URLSearchParams({
       scope,
-      targetProjectPath: props.activeWorkspace
+      targetProjectPath: props.activeWorkspace,
+      agent: props.activeAgent || 'codex',
+      workspace: props.activeWorkspace || 'all'
     });
     if (date && (scope === 'date' || scope === '5hour' || scope === 'weekly')) {
       params.set('date', date);
@@ -69,6 +75,7 @@ async function fetchLocalDiagnostics(
     }
 
     const res = await fetch(`/api/diagnostics?${params.toString()}`);
+
     if (res.ok) {
       const data = await res.json();
       localDiagnostics.value = data.diagnostics || [];
@@ -181,14 +188,15 @@ async function generateIssueFromRec(diagnostic, action) {
   }
 }
 
-watch(() => props.activeWorkspace, () => {
-  fetchLocalDiagnostics(activeScopeMode.value, filterDate.value, filterSessionId.value);
+watch([() => props.activeWorkspace, () => props.activeAgent], () => {
+  fetchLocalDiagnostics(activeScopeMode.value, filterDate.value, filter5HourStart.value, filterSessionId.value);
 });
 
 onMounted(() => {
   fetchLocalDiagnostics('all');
 });
 </script>
+
 
 <template>
   <div class="guided-optimizer card">

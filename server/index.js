@@ -80,8 +80,18 @@ app.get('/api/sessions/:id', async (req, res) => {
 // 4. Guided diagnostics with What-If simulation and date/scope filtering
 app.get('/api/diagnostics', async (req, res) => {
   try {
-    const { scope = 'all', date, startHour, sessionId, targetProjectPath = process.cwd() } = req.query;
-    const sessions = await getAllSessions();
+    const { scope = 'all', date, startHour, sessionId, agent, workspace, targetProjectPath = process.cwd() } = req.query;
+    let sessions = await getAllSessions();
+    if (agent && agent !== 'all') {
+      sessions = sessions.filter(s => (s.agentType || 'codex') === agent);
+    }
+    if (workspace && workspace !== 'all') {
+      const target = workspace.toLowerCase().replace(/[\/\\]+$/, '');
+      sessions = sessions.filter(s => {
+        const cwd = (s.meta?.cwd || '').toLowerCase().replace(/[\/\\]+$/, '');
+        return cwd.startsWith(target) || target.startsWith(cwd);
+      });
+    }
     const overview = await getOverviewMetrics(sessions);
     const result = runDiagnostics(sessions, overview, { scope, date, startHour, sessionId }, targetProjectPath);
     res.json(result);
@@ -89,6 +99,7 @@ app.get('/api/diagnostics', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
 
 // 5. Action 7: Pacing & burn-rate forecast
 app.get('/api/pacing-forecast', async (req, res) => {
