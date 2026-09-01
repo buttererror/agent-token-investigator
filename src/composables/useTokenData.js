@@ -127,6 +127,62 @@ export function useTokenData() {
     }
   }
 
+  async function addProject(dirPath, customName) {
+    try {
+      const res = await fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: dirPath, name: customName })
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to add project');
+      }
+      const newProj = await res.json();
+      await fetchProjects();
+      setWorkspace(newProj.path);
+      return newProj;
+    } catch (e) {
+      throw e;
+    }
+  }
+
+  async function removeProject(dirPath) {
+    try {
+      const res = await fetch('/api/projects', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: dirPath })
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to remove project');
+      }
+      await fetchProjects();
+      if (activeWorkspace.value === dirPath) {
+        setWorkspace('all');
+      }
+    } catch (e) {
+      throw e;
+    }
+  }
+
+  async function browseDirectoryApi(dirPath) {
+    const url = dirPath ? `/api/browse-directory?path=${encodeURIComponent(dirPath)}` : '/api/browse-directory';
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Failed to browse directory');
+    return await res.json();
+  }
+
+  async function inspectDirectoryApi(dirPath) {
+    const res = await fetch(`/api/inspect-directory?path=${encodeURIComponent(dirPath)}`);
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Failed to inspect directory');
+    }
+    return await res.json();
+  }
+
   function setWorkspace(path) {
     if (!path) return;
     activeWorkspace.value = path;
@@ -202,6 +258,10 @@ export function useTokenData() {
     activeWorkspace,
     isAutoRefresh,
     setWorkspace,
+    addProject,
+    removeProject,
+    browseDirectoryApi,
+    inspectDirectoryApi,
     fetchGuidanceRecords,
     addGuidanceRecord,
     refresh: fetchAll

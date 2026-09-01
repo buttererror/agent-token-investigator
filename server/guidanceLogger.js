@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { getAllSessions } from './parser.js';
+import { loadCustomProjects } from './customProjects.js';
 
 const BACKUP_DIR = '/home/ellol/apps/agent-token-tracker/.backups';
 const LOG_FILE = path.join(BACKUP_DIR, 'guidance-history.json');
@@ -196,6 +197,23 @@ export async function getTrackedProjects() {
     }
   }
 
+  // Custom user-added projects
+  const customProjects = loadCustomProjects();
+  for (const cp of customProjects) {
+    if (fs.existsSync(cp.path)) {
+      const key = normalizeDir(cp.path);
+      projectMap.set(key, {
+        ...cp,
+        path: cp.path,
+        name: cp.name || path.basename(cp.path),
+        description: cp.description || `Custom project (${path.basename(cp.path)})`,
+        isDefault: false,
+        isCustom: true,
+        sessionCount: 0
+      });
+    }
+  }
+
   try {
     const sessions = await getAllSessions();
     for (const session of sessions) {
@@ -210,6 +228,7 @@ export async function getTrackedProjects() {
             name: path.basename(canonicalRoot),
             description: `Auto-discovered workspace (${path.basename(canonicalRoot)})`,
             isDefault: false,
+            isCustom: false,
             sessionCount: 1
           });
         } else {

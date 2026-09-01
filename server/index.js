@@ -10,6 +10,7 @@ import { lintPrompt } from './promptLinterEngine.js';
 import { runVerificationBenchmark } from './benchmarkEngine.js';
 import { logGuidanceChange, getGuidanceRecordsForProject, getTrackedProjects } from './guidanceLogger.js';
 import { generateTurnIssueReport, listTokenIssues } from './tokenIssueGenerator.js';
+import { addCustomProject, removeCustomProject, browseDirectory, inspectDirectory } from './customProjects.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -201,6 +202,55 @@ app.get('/api/projects', async (req, res) => {
     res.json(projects);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/projects', (req, res) => {
+  try {
+    const { path: dirPath, name } = req.body;
+    if (!dirPath) {
+      return res.status(400).json({ error: 'Directory path is required' });
+    }
+    const project = addCustomProject(dirPath, name);
+    res.json(project);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/projects', (req, res) => {
+  try {
+    const { path: dirPath } = req.body;
+    if (!dirPath) {
+      return res.status(400).json({ error: 'Directory path is required' });
+    }
+    const result = removeCustomProject(dirPath);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/browse-directory', (req, res) => {
+  try {
+    const { path: dirPath } = req.query;
+    const result = browseDirectory(dirPath);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/inspect-directory', (req, res) => {
+  try {
+    const { path: dirPath } = req.query;
+    if (!dirPath) {
+      return res.status(400).json({ error: 'Directory path is required' });
+    }
+    const result = inspectDirectory(dirPath);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 
