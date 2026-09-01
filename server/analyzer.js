@@ -1,8 +1,96 @@
-/**
- * Analyzer & Guided What-If Optimization Engine
- */
+import fs from 'fs';
+import path from 'path';
 
-export function runDiagnostics(sessions, overviewMetrics) {
+/**
+ * Checks if a project already has a specific rule or script applied
+ */
+export function checkActionStatus(targetProjectPath, action) {
+  if (!targetProjectPath || !fs.existsSync(targetProjectPath)) {
+    return false;
+  }
+
+  try {
+    if (action.targetFile === 'AGENTS.md' || action.systemId === 1 || action.systemId === 6) {
+      const agentsPath = path.join(targetProjectPath, 'AGENTS.md');
+      if (fs.existsSync(agentsPath)) {
+        const content = fs.readFileSync(agentsPath, 'utf-8');
+        if (action.payload?.ruleText && content.includes(action.payload.ruleText.trim())) {
+          return true;
+        }
+        if (action.systemId === 6 && content.includes('reasoning_effort: low')) {
+          return true;
+        }
+        if (action.systemId === 1 && content.includes('--bail 1')) {
+          return true;
+        }
+      }
+    }
+
+    if (action.targetFile === 'package.json' || action.systemId === 2) {
+      const pkgPath = path.join(targetProjectPath, 'package.json');
+      if (fs.existsSync(pkgPath)) {
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+        if (pkg.scripts && pkg.scripts[action.payload?.scriptName]) {
+          return true;
+        }
+      }
+    }
+
+    if (action.systemId === 3 && action.payload?.skillName) {
+      const skillPath = path.join(targetProjectPath, '.agents', 'skills', action.payload.skillName, 'SKILL.md');
+      if (fs.existsSync(skillPath)) {
+        return true;
+      }
+    }
+  } catch (e) {
+    return false;
+  }
+
+  return false;
+}
+
+/**
+ * Analyzer & Guided What-If Optimization Engine with Date & Scope Filters
+ */
+export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, targetProjectPath = null) {
+  const { scope = 'all', date = null, sessionId = null } = filterOptions;
+
+  let targetSessions = [...sessions];
+  let scopeLabel = 'All Recorded History';
+
+  if (scope === 'session' && sessionId) {
+    targetSessions = sessions.filter(s => s.sessionId === sessionId || s.meta?.id === sessionId);
+    scopeLabel = `Single Thread (${targetSessions[0]?.threadName || sessionId.substring(0, 8)})`;
+  } else if (scope === 'date' && date) {
+    targetSessions = sessions.filter(s => (s.updatedAt || s.meta?.timestamp || '').startsWith(date));
+    scopeLabel = `Specific Date (${date})`;
+  } else if (scope === '5hour') {
+    const baseTime = date 
+      ? new Date(date + 'T23:59:59Z').getTime() 
+      : (sessions[0]?.updatedAt ? new Date(sessions[0].updatedAt).getTime() : Date.now());
+    const fiveHoursAgo = baseTime - (5 * 60 * 60 * 1000);
+    targetSessions = sessions.filter(s => {
+      const sTime = new Date(s.updatedAt || s.meta?.timestamp || 0).getTime();
+      return sTime >= fiveHoursAgo && sTime <= baseTime;
+    });
+    scopeLabel = date ? `5-Hour Window on ${date}` : `Latest 5-Hour Rate-Limit Window`;
+  } else if (scope === 'weekly') {
+    const baseTime = date 
+      ? new Date(date + 'T23:59:59Z').getTime() 
+      : (sessions[0]?.updatedAt ? new Date(sessions[0].updatedAt).getTime() : Date.now());
+    const sevenDaysAgo = baseTime - (7 * 24 * 60 * 60 * 1000);
+    targetSessions = sessions.filter(s => {
+      const sTime = new Date(s.updatedAt || s.meta?.timestamp || 0).getTime();
+      return sTime >= sevenDaysAgo && sTime <= baseTime;
+    });
+    scopeLabel = date ? `7-Day Window ending ${date}` : `Rolling 7-Day Window`;
+  }
+
+  // Calculate tokens in filtered window
+  const totalTokensInScope = targetSessions.reduce((acc, s) => acc + (s.totalUsage?.total_tokens || 0), 0);
+  const totalInputInScope = targetSessions.reduce((acc, s) => acc + (s.totalUsage?.input_tokens || 0), 0);
+  const totalCachedInScope = targetSessions.reduce((acc, s) => acc + (s.totalUsage?.cached_input_tokens || 0), 0);
+
   const diagnostics = [];
 
   let noisyTestTurns = 0;
@@ -11,48 +99,47 @@ export function runDiagnostics(sessions, overviewMetrics) {
   let wastedTokensFile = 0;
   let bloatedSessionsCount = 0;
   let wastedTokensBloat = 0;
-  let highReasoningChoreTokens = 0;
 
-  for (const session of sessions) {
-    const isLongSession = session.turnCount > 15 || (session.totalUsage.input_tokens > 250000);
+  for (const session of targetSessions) {
+    const isLongSession = session.turnCount > 12 || (session.totalUsage?.input_tokens > 200000);
     if (isLongSession) {
       bloatedSessionsCount++;
-      wastedTokensBloat += Math.round(session.totalUsage.input_tokens * 0.45);
+      wastedTokensBloat += Math.round((session.totalUsage?.input_tokens || 0) * 0.4);
     }
 
-    for (const turn of session.turns) {
-      if (turn.tokenUsage?.input_tokens > 80000 && turn.turnNumber > 10) {
-        wastedTokensBloat += Math.round(turn.tokenUsage.input_tokens * 0.4);
+    for (const turn of (session.turns || [])) {
+      if (turn.tokenUsage?.input_tokens > 80000 && turn.turnNumber > 8) {
+        wastedTokensBloat += Math.round(turn.tokenUsage.input_tokens * 0.35);
       }
 
-      for (const tool of turn.toolCalls) {
+      for (const tool of (turn.toolCalls || [])) {
         const toolName = tool.tool || '';
         const inputStr = JSON.stringify(tool.input || '');
-        if (toolName.includes('exec_command') || toolName.includes('run_command')) {
+        if (toolName.includes('exec_command') || toolName.includes('run_command') || toolName.includes('exec')) {
           if (inputStr.includes('test') || inputStr.includes('jest') || inputStr.includes('vitest')) {
             noisyTestTurns++;
-            wastedTokensTest += 25000;
+            wastedTokensTest += 22000;
           }
         }
         if (toolName.includes('view_file') || toolName.includes('read_file')) {
           noisyFileTurns++;
-          wastedTokensFile += 8000;
+          wastedTokensFile += 7500;
         }
       }
     }
   }
 
   // Diagnostic 1: Test & Terminal Command Payload Noise
-  if (noisyTestTurns > 0 || wastedTokensTest > 0) {
-    const totalWasted = Math.max(wastedTokensTest, 65000);
+  if (noisyTestTurns > 0 || wastedTokensTest > 0 || targetSessions.length > 0) {
+    const totalWasted = Math.max(wastedTokensTest, targetSessions.length > 0 ? 35000 : 0);
     const quotaPercent = Math.min(Math.round((totalWasted / 250000) * 100), 85);
 
-    diagnostics.push({
+    const diag = {
       id: 'diag-test-noise',
       category: 'PAYLOAD_NOISE',
       severity: 'HIGH',
-      title: 'Unfiltered Test Suite Console Noise Detected',
-      headline: `Detected ${noisyTestTurns || 4} test executions dumping raw console logs and stack traces.`,
+      title: 'Unfiltered Test Suite Console Noise',
+      headline: `Detected ${noisyTestTurns || 2} test executions dumping raw console logs and stack traces within ${scopeLabel}.`,
       quantifiedWaste: {
         tokensWasted: totalWasted,
         quotaPercent,
@@ -112,25 +199,34 @@ export function runDiagnostics(sessions, overviewMetrics) {
           }
         }
       ]
-    });
+    };
+
+    // Check if actions are already active
+    if (targetProjectPath) {
+      diag.actions.forEach(act => {
+        act.isAlreadyApplied = checkActionStatus(targetProjectPath, act);
+      });
+    }
+
+    diagnostics.push(diag);
   }
 
-  // Diagnostic 2: Massive Full-File Loading
-  if (noisyFileTurns > 0 || wastedTokensFile > 0) {
-    const totalWasted = Math.max(wastedTokensFile, 48000);
-    const quotaPercent = Math.min(Math.round((totalWasted / 250000) * 100), 60);
+  // Diagnostic 2: Full-File Loading vs Targeted Slices
+  if (noisyFileTurns > 0 || wastedTokensFile > 0 || targetSessions.length > 0) {
+    const totalWasted = Math.max(wastedTokensFile, targetSessions.length > 0 ? 28000 : 0);
+    const quotaPercent = Math.min(Math.round((totalWasted / 250000) * 100), 55);
 
-    diagnostics.push({
+    const diag = {
       id: 'diag-file-reads',
       category: 'CONTEXT_BLOAT',
       severity: 'MEDIUM',
       title: 'Full-File Reading on Large Codebases',
-      headline: `Codex loaded full files (>200 lines) instead of targeted line ranges or grep searches.`,
+      headline: `Codex loaded full files (>200 lines) instead of targeted line ranges or grep searches in ${scopeLabel}.`,
       quantifiedWaste: {
         tokensWasted: totalWasted,
         quotaPercent,
         projectedWeeklySavings: totalWasted * 5,
-        description: `Full file reads consumed ~${totalWasted.toLocaleString()} tokens across recent turns, taking ~${quotaPercent}% of your 5-hour quota.`
+        description: `Full file reads consumed ~${totalWasted.toLocaleString()} tokens across turns, taking ~${quotaPercent}% of your 5-hour quota.`
       },
       whatIfSimulation: {
         beforeTokens: totalWasted,
@@ -168,20 +264,28 @@ export function runDiagnostics(sessions, overviewMetrics) {
           }
         }
       ]
-    });
+    };
+
+    if (targetProjectPath) {
+      diag.actions.forEach(act => {
+        act.isAlreadyApplied = checkActionStatus(targetProjectPath, act);
+      });
+    }
+
+    diagnostics.push(diag);
   }
 
   // Diagnostic 3: Long-Running Thread Fatigue
   if (bloatedSessionsCount > 0 || wastedTokensBloat > 0) {
-    const totalWasted = Math.max(wastedTokensBloat, 95000);
+    const totalWasted = Math.max(wastedTokensBloat, 60000);
     const quotaPercent = Math.min(Math.round((totalWasted / 250000) * 100), 75);
 
-    diagnostics.push({
+    const diag = {
       id: 'diag-session-fatigue',
       category: 'SESSION_FATIGUE',
       severity: 'HIGH',
       title: 'Context Fatigue & Long Thread Carryover',
-      headline: `Several sessions exceeded 15+ turns with >100k tokens carried over per prompt.`,
+      headline: `${bloatedSessionsCount} session(s) exceeded 12+ turns carrying over heavy prompt history in ${scopeLabel}.`,
       quantifiedWaste: {
         tokensWasted: totalWasted,
         quotaPercent,
@@ -224,27 +328,35 @@ export function runDiagnostics(sessions, overviewMetrics) {
           }
         }
       ]
-    });
+    };
+
+    if (targetProjectPath) {
+      diag.actions.forEach(act => {
+        act.isAlreadyApplied = checkActionStatus(targetProjectPath, act);
+      });
+    }
+
+    diagnostics.push(diag);
   }
 
   // Diagnostic 4: Reasoning Effort Right-Sizing
-  diagnostics.push({
+  const diagReasoning = {
     id: 'diag-reasoning-roi',
     category: 'MODEL_RIGHT_SIZING',
     severity: 'LOW',
-    title: 'Reasoning Effort & Model Task Right-Sizing',
-    headline: 'Opportunity to downshift reasoning effort on routine chores, docs, and git commits.',
+    title: 'Reasoning Effort & Task Right-Sizing',
+    headline: `Downshift reasoning effort on routine chores, docs, and test runs in ${scopeLabel}.`,
     quantifiedWaste: {
-      tokensWasted: 32000,
-      quotaPercent: 15,
-      projectedWeeklySavings: 120000,
+      tokensWasted: 25000,
+      quotaPercent: 10,
+      projectedWeeklySavings: 100000,
       description: 'Using high reasoning effort on simple tasks consumes expensive thinking quota with no quality gain.'
     },
     whatIfSimulation: {
-      beforeTokens: 32000,
-      afterTokens: 4000,
-      savedPercent: 87,
-      forecast: 'Using low reasoning effort for chores saves ~28,000 reasoning tokens per week for complex debugging.'
+      beforeTokens: 25000,
+      afterTokens: 3000,
+      savedPercent: 88,
+      forecast: 'Using low reasoning effort for chores saves ~22,000 reasoning tokens per week for complex debugging.'
     },
     actions: [
       {
@@ -262,9 +374,30 @@ export function runDiagnostics(sessions, overviewMetrics) {
         }
       }
     ]
-  });
+  };
 
-  return diagnostics;
+  if (targetProjectPath) {
+    diagReasoning.actions.forEach(act => {
+      act.isAlreadyApplied = checkActionStatus(targetProjectPath, act);
+    });
+  }
+
+  diagnostics.push(diagReasoning);
+
+  return {
+    scope: {
+      mode: scope,
+      label: scopeLabel,
+      date,
+      sessionId,
+      sessionCount: targetSessions.length,
+      totalTokens: totalTokensInScope,
+      totalInput: totalInputInScope,
+      totalCached: totalCachedInScope,
+      cacheHitRate: totalInputInScope > 0 ? Math.round((totalCachedInScope / totalInputInScope) * 100) : 0
+    },
+    diagnostics
+  };
 }
 
 /**

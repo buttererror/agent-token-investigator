@@ -59,13 +59,14 @@ app.get('/api/sessions/:id', async (req, res) => {
   }
 });
 
-// 4. Guided diagnostics with What-If simulation
+// 4. Guided diagnostics with What-If simulation and date/scope filtering
 app.get('/api/diagnostics', async (req, res) => {
   try {
+    const { scope = 'all', date, sessionId, targetProjectPath = '/home/ellol/solutions/clinic-platform' } = req.query;
     const sessions = await getAllSessions();
     const overview = await getOverviewMetrics();
-    const diagnostics = runDiagnostics(sessions, overview);
-    res.json(diagnostics);
+    const result = runDiagnostics(sessions, overview, { scope, date, sessionId }, targetProjectPath);
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

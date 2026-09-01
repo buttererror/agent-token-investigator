@@ -17,6 +17,7 @@ const {
   overview,
   sessions,
   diagnostics,
+  diagnosticScope,
   pacingForecast,
   glossary,
   isLoading,
@@ -24,6 +25,7 @@ const {
   selectedSession,
   activeWorkspace,
   isAutoRefresh,
+  setScope,
   refresh
 } = useTokenData();
 
@@ -76,7 +78,10 @@ function toggleRefresh() {
       <!-- Centerpiece: Guided Optimization Advisor (What-If Simulator & 7 Actions) -->
       <GuidedOptimizer 
         :diagnostics="diagnostics"
+        :diagnostic-scope="diagnosticScope"
+        :all-sessions="sessions"
         :active-workspace="activeWorkspace"
+        @change-scope="setScope"
         @open-handoff="isHandoffOpen = true"
         @open-skill-gen="isSkillGenOpen = true"
         @open-linter="isLinterOpen = true"
