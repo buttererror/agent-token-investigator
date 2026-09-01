@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch, onMounted } from 'vue';
+import { ref, watch, onMounted, computed } from 'vue';
 
 const props = defineProps({
   session: {
@@ -18,13 +18,19 @@ const currentSession = ref(props.session);
 const handoffData = ref(null);
 const isLoading = ref(true);
 const copied = ref(false);
+const activeFormat = ref('structured'); // 'structured' | 'compact' | 'plan'
+const isEditing = ref(false);
+const editedPrompt = ref('');
 
 async function loadHandoff(sessionId) {
   isLoading.value = true;
   try {
     const res = await fetch(`/api/generate-handoff/${sessionId}`);
     if (res.ok) {
-      handoffData.value = await res.json();
+      const data = await res.json();
+      handoffData.value = data;
+      editedPrompt.value = data.summaryPrompt;
+      isEditing.value = false;
     }
   } catch (e) {
     // fallback
@@ -45,9 +51,84 @@ watch(currentSession, (newSession) => {
   }
 });
 
+const formattedPrompt = computed(() => {
+  if (!handoffData.value) return '';
+  if (isEditing.value || activeFormat.value === 'structured') {
+    return editedPrompt.value || handoffData.value.summaryPrompt;
+  }
+
+  const d = handoffData.value;
+  const filesList = d.modifiedFiles && d.modifiedFiles.length > 0 
+    ? d.modifiedFiles.map(f => `\`${f}\``).join(', ') 
+    : 'relevant workspace files';
+
+  if (activeFormat.value === 'compact') {
+    return `### Clean Session Handoff (${d.agentLabel || 'Agent'})
+**Goal**: ${d.taskGoal}
+**Latest Directive**: ${d.latestPrompt || d.taskGoal}
+**Active Files**: ${filesList}
+**Last State**: ${d.lastDecision || 'Ready for next step.'}
+**Instruction**: Continue the implementation step-by-step. Keep file inspections minimal and avoid verbose outputs.`;
+  }
+
+  if (activeFormat.value === 'plan') {
+    const directives = (d.userDirectives || []).map(item => `- [x] ${item}`).join('\n');
+    return `# 🎯 Implementation Handoff & Work Plan
+
+## Objective
+${d.taskGoal}
+
+## Accomplished & Requested Steps
+${directives || '- [x] Initial task requirements defined'}
+- [ ] ${d.latestPrompt || 'Implement next task step'}
+
+## Modified Files
+${d.modifiedFiles.map(f => `- [${f}](file:///${f})`).join('\n') || '- None'}
+
+## Next Agent Directive
+Please pick up from the unchecked item above. Use targeted line ranges (progressive disclosure) when viewing code.`;
+  }
+
+  return editedPrompt.value || handoffData.value.summaryPrompt;
+});
+
+function handleFormatChange(fmt) {
+  activeFormat.value = fmt;
+  if (fmt === 'structured') {
+    editedPrompt.value = handoffData.value?.summaryPrompt || '';
+  } else if (fmt === 'compact') {
+    const d = handoffData.value;
+    const filesList = d.modifiedFiles && d.modifiedFiles.length > 0 ? d.modifiedFiles.map(f => `\`${f}\``).join(', ') : 'relevant workspace files';
+    editedPrompt.value = `### Clean Session Handoff (${d.agentLabel || 'Agent'})
+**Goal**: ${d.taskGoal}
+**Latest Directive**: ${d.latestPrompt || d.taskGoal}
+**Active Files**: ${filesList}
+**Last State**: ${d.lastDecision || 'Ready for next step.'}
+**Instruction**: Continue the implementation step-by-step. Keep file inspections minimal and avoid verbose outputs.`;
+  } else if (fmt === 'plan') {
+    const d = handoffData.value;
+    const directives = (d.userDirectives || []).map(item => `- [x] ${item}`).join('\n');
+    editedPrompt.value = `# 🎯 Implementation Handoff & Work Plan
+
+## Objective
+${d.taskGoal}
+
+## Accomplished & Requested Steps
+${directives || '- [x] Initial task requirements defined'}
+- [ ] ${d.latestPrompt || 'Implement next task step'}
+
+## Modified Files
+${d.modifiedFiles.map(f => `- [${f}](file:///${f})`).join('\n') || '- None'}
+
+## Next Agent Directive
+Please pick up from the unchecked item above. Use targeted line ranges (progressive disclosure) when viewing code.`;
+  }
+}
+
 function copyHandoff() {
-  if (handoffData.value?.summaryPrompt) {
-    navigator.clipboard.writeText(handoffData.value.summaryPrompt);
+  const text = isEditing.value ? editedPrompt.value : formattedPrompt.value;
+  if (text) {
+    navigator.clipboard.writeText(text);
     copied.value = true;
     setTimeout(() => { copied.value = false; }, 3000);
   }
@@ -60,7 +141,7 @@ function copyHandoff() {
       <div class="modal-head">
         <div class="head-info">
           <h3>📋 State-Preserving Session Handoff</h3>
-          <span class="sub-text">Export compact resumption prompt to start a fresh thread without losing progress</span>
+          <span class="sub-text">Export structured continuation prompts with active files & goals to start a fresh, lean agent thread</span>
         </div>
         <button class="close-btn" @click="$emit('close')">✕</button>
       </div>
@@ -70,7 +151,7 @@ function copyHandoff() {
         <label>Selected Thread:</label>
         <select v-model="currentSession" class="picker-select mono">
           <option v-for="s in allSessions" :key="s.sessionId" :value="s">
-            {{ s.threadName }} ({{ s.turnCount }} turns)
+            {{ s.agentIcon || '🤖' }} {{ s.threadName }} ({{ s.turnCount }} turns)
           </option>
         </select>
       </div>
@@ -82,16 +163,20 @@ function copyHandoff() {
       <div v-else-if="handoffData" class="handoff-content">
         <!-- Honest Context-Aware Advice Banner -->
         <div v-if="handoffData.turnCount <= 8" class="advice-banner banner-info">
-          <span>🟢 <strong>Note on Short Threads:</strong> This thread is only <strong>{{ handoffData.turnCount }} turns</strong> and currently lean. A handoff prompt is most useful when a thread reaches <strong>15–20+ turns</strong> with context fatigue.</span>
+          <span>🟢 <strong>Note on Short Threads:</strong> This thread is <strong>{{ handoffData.turnCount }} turns</strong> and still compact. Exporting a handoff is especially impactful when conversations exceed <strong>15–20 turns</strong> (~100k tokens).</span>
         </div>
         <div v-else class="advice-banner banner-savings">
-          <span>💡 <strong>Context Reset Savings:</strong> This thread has reached <strong>{{ handoffData.turnCount }} turns</strong> (~{{ (handoffData.lastTurnInputTokens || 0).toLocaleString() }} tokens/turn). Moving to a fresh window saves <strong>~{{ (handoffData.tokensSavedEstimate || 0).toLocaleString() }} tokens</strong> on every new question.</span>
+          <span>💡 <strong>Context Reset Savings:</strong> This thread has reached <strong>{{ handoffData.turnCount }} turns</strong> (~{{ (handoffData.lastTurnInputTokens || 0).toLocaleString() }} tokens/turn). Moving to a fresh window saves <strong>~{{ (handoffData.tokensSavedEstimate || 0).toLocaleString() }} tokens</strong> on every new prompt.</span>
         </div>
 
         <div class="extracted-details-grid">
           <div class="detail-item">
-            <span class="lbl">Detected Objective:</span>
+            <span class="lbl">Primary Objective:</span>
             <span class="val">{{ handoffData.taskGoal }}</span>
+          </div>
+          <div v-if="handoffData.latestPrompt && handoffData.latestPrompt !== handoffData.taskGoal" class="detail-item">
+            <span class="lbl">Latest Directive:</span>
+            <span class="val text-blue">{{ handoffData.latestPrompt }}</span>
           </div>
           <div class="detail-item">
             <span class="lbl">Active Files ({{ handoffData.modifiedFiles.length }}):</span>
@@ -106,21 +191,57 @@ function copyHandoff() {
 
         <div class="prompt-output-box">
           <div class="box-head">
-            <span class="box-title">Generated Fresh-Start Prompt:</span>
-            <button class="btn btn-primary btn-sm" @click="copyHandoff">
-              <span>{{ copied ? '✅ Copied!' : '📋 Copy Prompt' }}</span>
-            </button>
+            <div class="format-tabs">
+              <button 
+                :class="['fmt-tab-btn', { active: activeFormat === 'structured' }]"
+                @click="handleFormatChange('structured')"
+              >
+                📝 Full Brief
+              </button>
+              <button 
+                :class="['fmt-tab-btn', { active: activeFormat === 'compact' }]"
+                @click="handleFormatChange('compact')"
+              >
+                ⚡ Compact
+              </button>
+              <button 
+                :class="['fmt-tab-btn', { active: activeFormat === 'plan' }]"
+                @click="handleFormatChange('plan')"
+              >
+                📋 Task Plan
+              </button>
+            </div>
+
+            <div class="box-actions">
+              <button class="btn btn-secondary btn-sm" @click="isEditing = !isEditing">
+                {{ isEditing ? '👁️ Preview' : '✏️ Edit' }}
+              </button>
+              <button class="btn btn-primary btn-sm" @click="copyHandoff">
+                <span>{{ copied ? '✅ Copied to Clipboard!' : '📋 Copy Prompt for New Chat' }}</span>
+              </button>
+            </div>
           </div>
+
           <textarea 
-            v-model="handoffData.summaryPrompt" 
+            v-if="isEditing"
+            v-model="editedPrompt" 
             class="handoff-textarea mono"
-            rows="8"
+            rows="12"
           ></textarea>
+          <div v-else class="prompt-preview-wrap">
+            <textarea 
+              :value="formattedPrompt" 
+              class="handoff-textarea mono"
+              rows="12"
+              readonly
+            ></textarea>
+          </div>
         </div>
       </div>
     </div>
   </div>
 </template>
+
 
 <style scoped>
 .modal-head {
@@ -255,12 +376,45 @@ function copyHandoff() {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
-.box-title {
-  font-size: 0.82rem;
-  font-weight: 700;
+.format-tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--bg-input);
+  padding: 3px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+}
+
+.fmt-tab-btn {
+  background: none;
+  border: none;
   color: var(--text-muted);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.fmt-tab-btn:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.fmt-tab-btn.active {
+  color: #fff;
+  background: var(--accent-blue);
+}
+
+.box-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .handoff-textarea {
@@ -271,8 +425,15 @@ function copyHandoff() {
   color: var(--text-main);
   padding: 12px;
   font-size: 0.82rem;
+  line-height: 1.5;
   outline: none;
+  resize: vertical;
+}
+
+.handoff-textarea:focus {
+  border-color: var(--accent-blue);
 }
 
 .text-xs { font-size: 0.72rem; }
 </style>
+
