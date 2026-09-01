@@ -370,9 +370,9 @@ ${(turn.toolCalls || []).map((t, i) => `${i + 1}. \`${t.tool}\`: \`${typeof t.in
 
 ## 3. Projected Impact & Waste
 
-- **Estimated Token Waste**: **~${projectedSavingsTokens.toLocaleString()} tokens**
-- **5-Hour Rate Limit Quota Reclaimed**: **~${Math.min(Math.round((projectedSavingsTokens / 250000) * 100), 75)}% of rolling budget**
-- **Financial Cost Saved**: **~$${((projectedSavingsTokens / 1000000) * 2.50).toFixed(3)} / session run**
+- **Potentially reducible observed tokens**: **~${projectedSavingsTokens.toLocaleString()} tokens (unvalidated estimate)**
+- **Provider quota impact**: **Not directly measurable from transcript telemetry**
+- **Financial impact**: **Not calculated; model-specific billing and provider quota accounting are unavailable in transcript telemetry**
 
 ---
 

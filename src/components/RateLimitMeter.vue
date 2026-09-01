@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import Tooltip from './common/Tooltip.vue';
 
 const props = defineProps({
@@ -14,8 +14,41 @@ const props = defineProps({
   activeAgent: {
     type: String,
     default: 'codex'
+  },
+  activeWorkspace: {
+    type: String,
+    default: 'all'
   }
 });
+
+const emit = defineEmits(['issue-generated']);
+const isGeneratingIssue = ref(false);
+const issueError = ref('');
+
+const canGenerateIncident = computed(() => {
+  const change = props.pacingForecast?.evidence?.usageChange;
+  return props.activeWorkspace && props.activeWorkspace !== 'all'
+    && change && change.toPercent > change.fromPercent;
+});
+
+async function generateIncident() {
+  isGeneratingIssue.value = true;
+  issueError.value = '';
+  try {
+    const response = await fetch('/api/pacing/generate-issue', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectPath: props.activeWorkspace, workspace: props.activeWorkspace, agent: props.activeAgent })
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Unable to generate provider usage incident.');
+    emit('issue-generated', result);
+  } catch (error) {
+    issueError.value = error.message;
+  } finally {
+    isGeneratingIssue.value = false;
+  }
+}
 
 const isAntigravity = computed(() => props.activeAgent === 'antigravity');
 
@@ -47,9 +80,9 @@ const resetTimeFormatted = computed(() => {
 
 const pacingStatusBadge = computed(() => {
   const status = props.pacingForecast?.status;
-  if (status === 'UNAVAILABLE') return { type: 'muted', text: 'Local Estimate' };
+  if (status === 'UNAVAILABLE') return { type: 'muted', text: 'Provider Data Unavailable' };
   if (status === 'CRITICAL') return { type: 'red', text: '⚠️ High Risk' };
-  if (status === 'WARNING') return { type: 'yellow', text: '⚡ Rapid Burn' };
+  if (status === 'WARNING') return { type: 'yellow', text: '⚡ High Usage' };
   return { type: 'green', text: '🟢 Sustainable' };
 });
 
@@ -75,9 +108,9 @@ const barColorPrimary = computed(() => {
         </span>
         <Tooltip 
           title="Rate-Limit Pacing Velocity" 
-          :text="isAntigravity 
-            ? 'Monitors Antigravity turn consumption rate (tokens/minute) and quota sustainability across active threads.'
-            : 'Monitors your consumption rate (tokens/minute) against the 5-hour reset window to prevent unexpected lockouts.'" 
+            :text="isAntigravity
+            ? 'Shows the newest provider quota snapshot separately from observed transcript activity.'
+            : 'Shows the newest provider quota snapshot separately from observed transcript activity.'"
           why-it-matters="Hitting 100% blocks your agent from answering until older usage rolls off the window."
         />
       </div>
@@ -114,7 +147,7 @@ const barColorPrimary = computed(() => {
             ⏳ {{ quotaAvailable ? `Resets in ${resetTimeFormatted}` : 'No reset timestamp available' }}
           </span>
           <span class="velocity-text mono">
-            🔥 ~{{ (pacingForecast?.burnRatePerMin || 0).toLocaleString() }} local tok/min
+            📊 ~{{ (pacingForecast?.observedTokensPerMinute || 0).toLocaleString() }} observed tok/min
           </span>
         </div>
       </div>
@@ -160,12 +193,25 @@ const barColorPrimary = computed(() => {
         <strong>Pacing Advisor:</strong> {{ pacingForecast.advice }}
       </span>
     </div>
+    <div v-if="canGenerateIncident" class="pacing-incident-action">
+      <button class="btn btn-secondary" :disabled="isGeneratingIssue" @click="generateIncident">
+        {{ isGeneratingIssue ? 'Generating…' : 'Generate Provider Usage Incident' }}
+      </button>
+      <span v-if="issueError" class="text-red">{{ issueError }}</span>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .rate-limit-card {
   margin-bottom: 24px;
+}
+
+.pacing-incident-action {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
 }
 
 .card-header {

@@ -328,6 +328,15 @@ export async function getAllSessions(forceRefresh = false) {
   return inFlightAllSessionsPromise;
 }
 
+/** Return the newest provider-reported quota snapshot across all sessions. */
+export function getLatestRateLimitSnapshot(sessions) {
+  return (sessions || [])
+    .flatMap((session) => (session.turns || [])
+      .filter((turn) => turn.rateLimits && Number.isFinite(Date.parse(turn.startedAt)))
+      .map((turn) => ({ snapshot: turn.rateLimits, timestamp: Date.parse(turn.startedAt) })))
+    .sort((a, b) => b.timestamp - a.timestamp)[0] || null;
+}
+
 /**
  * Returns latest rate limit snapshot and aggregate metrics
  */
@@ -348,10 +357,11 @@ export async function getOverviewMetrics(preloadedSessions = null) {
     totalReasoning += s.totalUsage.reasoning_output_tokens || 0;
     totalTokens += s.totalUsage.total_tokens || 0;
 
-    if (s.rateLimits && !latestRateLimit) {
-      latestRateLimit = s.rateLimits;
-    }
+    if (s.rateLimits && !latestRateLimit) latestRateLimit = s.rateLimits;
   }
+
+  const latestSnapshot = getLatestRateLimitSnapshot(sessions);
+  latestRateLimit = latestSnapshot?.snapshot || latestRateLimit;
 
   const cacheHitRate = totalInput > 0 ? (totalCached / totalInput) * 100 : 0;
   // Estimated dollars saved assuming $2.50/M input vs $1.25/M cached
@@ -370,6 +380,7 @@ export async function getOverviewMetrics(preloadedSessions = null) {
       primary: { used_percent: 0, window_minutes: 300, resets_at: Date.now() / 1000 + 18000 },
       secondary: { used_percent: 0, window_minutes: 10080, resets_at: Date.now() / 1000 + 604800 },
       plan_type: 'plus'
-    }
+    },
+    latestRateLimitSnapshotAt: latestSnapshot?.timestamp || null
   };
 }

@@ -142,9 +142,11 @@ onMounted(() => {
     <main v-if="!isLoading">
       <!-- Action 7: Rate Limits & Quota Meter -->
       <RateLimitMeter 
-        :rate-limits="filteredOverview?.latestRateLimit || (activeAgent === 'antigravity' ? null : overview?.latestRateLimit)"
-        :pacing-forecast="filteredPacingForecast || pacingForecast"
+        :rate-limits="pacingForecast?.rateLimits"
+        :pacing-forecast="pacingForecast"
         :active-agent="activeAgent"
+        :active-workspace="activeWorkspace"
+        @issue-generated="() => fetchIssuesCount(activeWorkspace)"
       />
 
 

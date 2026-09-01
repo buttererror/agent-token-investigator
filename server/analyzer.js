@@ -450,13 +450,51 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
 /**
  * Calculates live burn velocity and rate-limit pacing forecast
  */
-export function calculatePacingForecast(rateLimits, sessions) {
+export function calculatePacingForecast(rateLimitSnapshot, sessions) {
+  const rateLimits = rateLimitSnapshot?.snapshot || rateLimitSnapshot || null;
   const primary = rateLimits?.primary;
   const quotaAvailable = Number.isFinite(primary?.used_percent) && Number.isFinite(primary?.resets_at);
   const usedPercent = quotaAvailable ? primary.used_percent : null;
   const resetsAt = quotaAvailable ? primary.resets_at : null;
   const nowSec = Date.now() / 1000;
   const minutesUntilReset = quotaAvailable ? Math.max(Math.round((resetsAt - nowSec) / 60), 0) : null;
+  const snapshotAt = Number.isFinite(rateLimitSnapshot?.timestamp) ? rateLimitSnapshot.timestamp : null;
+  const snapshotAgeMinutes = snapshotAt === null ? null : Math.max(Math.round((Date.now() - snapshotAt) / 60000), 0);
+  const snapshotIsFresh = snapshotAgeMinutes !== null && snapshotAgeMinutes <= 5;
+
+  const providerSnapshots = (sessions || [])
+    .flatMap((session) => (session.turns || []).map((turn) => ({
+      sessionId: session.sessionId,
+      timestamp: Date.parse(turn.startedAt),
+      usedPercent: turn.rateLimits?.primary?.used_percent
+    })))
+    .filter((snapshot) => Number.isFinite(snapshot.timestamp) && Number.isFinite(snapshot.usedPercent))
+    .sort((a, b) => a.timestamp - b.timestamp);
+  const oneHourAgo = Date.now() - (60 * 60 * 1000);
+  const recentProviderSnapshots = providerSnapshots.filter((snapshot) => snapshot.timestamp >= oneHourAgo);
+  const firstRecentSnapshot = recentProviderSnapshots[0] || null;
+  const lastRecentSnapshot = recentProviderSnapshots.at(-1) || null;
+  const usageChange = firstRecentSnapshot && lastRecentSnapshot && firstRecentSnapshot !== lastRecentSnapshot
+    ? {
+      fromPercent: firstRecentSnapshot.usedPercent,
+      toPercent: lastRecentSnapshot.usedPercent,
+      periodMinutes: Math.max(Math.round((lastRecentSnapshot.timestamp - firstRecentSnapshot.timestamp) / 60000), 1)
+    }
+    : null;
+  const evidenceStart = firstRecentSnapshot?.timestamp || oneHourAgo;
+  const activeSessionCount = new Set((sessions || []).filter((session) =>
+    (session.turns || []).some((turn) => Date.parse(turn.startedAt) >= evidenceStart)
+  ).map((session) => session.sessionId)).size;
+  const likelyContributors = (sessions || [])
+    .flatMap((session) => (session.turns || []).map((turn) => ({
+      sessionId: session.sessionId,
+      startedAt: turn.startedAt,
+      observedTokens: turn.tokenUsage?.total_tokens || 0,
+      confidence: 'likely-contributor'
+    })))
+    .filter((turn) => Date.parse(turn.startedAt) >= evidenceStart && turn.observedTokens > 0)
+    .sort((a, b) => b.observedTokens - a.observedTokens)
+    .slice(0, 3);
 
   // Local activity estimate from transcript turns seen in the last two hours.
   // This must not be presented as a provider quota measurement.
@@ -470,43 +508,49 @@ export function calculatePacingForecast(rateLimits, sessions) {
       }
     }
   }
-  const burnRatePerMin = Math.round(recentTokens / 120);
+  const observedTokensPerMinute = Math.round(recentTokens / 120);
 
-  if (!quotaAvailable) {
+  if (!quotaAvailable || !snapshotIsFresh) {
     return {
       quotaAvailable: false,
       usedPercent: null,
       minutesUntilReset: null,
-      burnRatePerMin,
-      minutesUntilExhaustion: null,
+      rateLimits: null,
+      providerSnapshotAt: snapshotAt,
+      snapshotAgeMinutes,
+      observedTokensLastTwoHours: recentTokens,
+      observedTokensPerMinute,
+      evidence: { usageChange, activeSessionCount, likelyContributors },
       status: 'UNAVAILABLE',
-      advice: 'Live provider quota is unavailable in Antigravity transcript logs. Local activity is estimated from the last two hours only.'
+      advice: snapshotAt
+        ? `The latest provider quota snapshot is ${snapshotAgeMinutes}m old, so current quota is unavailable.`
+        : 'Live provider quota is unavailable in transcript logs. Local activity is estimated from the last two hours only.'
     };
   }
 
-  // Minutes until 100% capacity at current pace
-  const remainingPercent = 100 - usedPercent;
-  const minutesUntilExhaustion = remainingPercent > 0 
-    ? Math.round((remainingPercent / 100) * (250000 / Math.max(burnRatePerMin, 1)))
-    : 0;
-
   let status = 'HEALTHY';
-  let advice = 'Pacing is sustainable. You have plenty of quota before the next reset.';
+  let advice = usageChange && usageChange.toPercent > usageChange.fromPercent
+    ? `Provider usage rose ${usageChange.fromPercent}% → ${usageChange.toPercent}% in ${usageChange.periodMinutes}m across ${activeSessionCount} active session(s).`
+    : 'Provider usage is below the warning threshold.';
 
   if (usedPercent >= 80) {
     status = 'CRITICAL';
-    advice = `You are at ${usedPercent}% of your 5-hour limit. Pause heavy subagents for ${minutesUntilReset}m until reset.`;
-  } else if (usedPercent >= 60 && minutesUntilExhaustion < minutesUntilReset) {
+    advice = `Provider usage is ${usedPercent}%. Avoid starting additional heavy tasks until reset.`;
+  } else if (usedPercent >= 60) {
     status = 'WARNING';
-    advice = `Burn velocity (${burnRatePerMin.toLocaleString()} tok/min) may exhaust quota in ~${minutesUntilExhaustion}m. Consider switching to low reasoning effort.`;
+    advice = `Provider usage is ${usedPercent}%. Keep work focused and use low reasoning for routine tasks.`;
   }
 
   return {
     quotaAvailable: true,
     usedPercent,
     minutesUntilReset,
-    burnRatePerMin,
-    minutesUntilExhaustion,
+    rateLimits,
+    providerSnapshotAt: snapshotAt,
+    snapshotAgeMinutes,
+    observedTokensLastTwoHours: recentTokens,
+    observedTokensPerMinute,
+    evidence: { usageChange, activeSessionCount, likelyContributors },
     status,
     advice
   };

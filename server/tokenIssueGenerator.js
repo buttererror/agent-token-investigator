@@ -262,9 +262,9 @@ ${formatToolSummary(turn.toolCalls)}
 
 ## 3. Projected Impact & Waste
 
-- **Estimated Token Waste**: **~${projectedSavingsTokens.toLocaleString()} tokens**
-- **5-Hour Rate Limit Quota Reclaimed**: **~${Math.min(Math.round((projectedSavingsTokens / 250000) * 100), 75)}% of rolling budget**
-- **Financial Cost Saved**: **~$${((projectedSavingsTokens / 1000000) * 2.50).toFixed(3)} / session run**
+- **Potentially reducible observed tokens**: **~${projectedSavingsTokens.toLocaleString()} tokens (unvalidated estimate)**
+- **Provider quota impact**: **Not directly measurable from transcript telemetry**
+- **Financial impact**: **Not calculated; model-specific billing and provider quota accounting are unavailable in transcript telemetry**
 
 ---
 
@@ -322,6 +322,78 @@ ${goodExample}
     guidanceRecord: record,
     savings: projectedSavingsTokens
   };
+}
+
+/**
+ * Generates a read-only incident report from provider quota change evidence.
+ * Correlation is intentionally labeled as likely contribution, never causation.
+ */
+export function generatePacingIssueReport({ projectPath, forecast }) {
+  const usageChange = forecast?.evidence?.usageChange;
+  if (!usageChange || usageChange.toPercent <= usageChange.fromPercent) {
+    throw new Error('A provider usage increase is required to generate a pacing incident.');
+  }
+
+  const targetDir = getIssueDirectory(projectPath);
+  const timeStr = Date.now().toString().slice(-6);
+  const fileName = `issue-provider-pacing-${timeStr}.md`;
+  const filePath = path.join(targetDir, fileName);
+  const contributors = forecast.evidence?.likelyContributors || [];
+  const contributorRows = contributors.length
+    ? contributors.map((turn) => `| \`${String(turn.sessionId || 'unknown').slice(0, 8)}\` | ${turn.startedAt || 'Unknown'} | ${Number(turn.observedTokens || 0).toLocaleString()} | ${turn.confidence || 'likely-contributor'} |`).join('\n')
+    : '| — | — | — | No nearby turn telemetry |';
+  const actions = [
+    'Do not start another heavy task while provider usage is elevated.',
+    'Use low reasoning effort for routine edits, searches, and validation.',
+    'Create a concise handoff and continue in a fresh thread when context is no longer needed.',
+    'Request targeted file ranges and quiet, bail-fast test output.'
+  ];
+  if ((forecast.evidence?.activeSessionCount || 0) > 1) {
+    actions.unshift(`Review the ${forecast.evidence.activeSessionCount} sessions active in this interval; avoid overlapping context-heavy work.`);
+  }
+  const agentPrompt = `Review the provider-usage incident in @docs/tokens-consumptions/issues/${fileName}. Treat contributors as correlation evidence only. Choose the smallest workflow adjustment from the recommended actions; do not add controls that pause or manage other Codex tasks.`;
+  const markdownContent = `# 📋 Provider Usage Incident
+> **Status**: \`OBSERVED / LIKELY CONTRIBUTORS\`
+> **Target Workspace**: \`${normalizeDir(projectPath)}\`
+> **Created Date**: ${new Date().toISOString().split('T')[0]}
+
+## Provider evidence
+
+Provider usage rose **${usageChange.fromPercent}% → ${usageChange.toPercent}%** over **${usageChange.periodMinutes} minutes**.
+The tracker observed **${forecast.evidence?.activeSessionCount || 0} active session(s)** in that interval.
+
+## Likely contributors
+
+| Session | Turn time | Observed transcript tokens | Confidence |
+| :--- | :--- | ---: | :--- |
+${contributorRows}
+
+These turns are correlated with the provider usage increase. Transcript telemetry cannot prove each turn's provider quota cost.
+
+## Recommended actions
+
+${actions.map((action, index) => `${index + 1}. ${action}`).join('\n')}
+
+## Handoff directive
+
+\`\`\`markdown
+${agentPrompt}
+\`\`\`
+`;
+
+  fs.writeFileSync(filePath, markdownContent, 'utf8');
+  const record = logGuidanceChange({
+    projectPath,
+    actionType: 'GENERATE_PROVIDER_PACING_ISSUE',
+    what: `Generated provider pacing incident (${fileName})`,
+    why: `Provider usage rose ${usageChange.fromPercent}% to ${usageChange.toPercent}% in ${usageChange.periodMinutes} minutes.`,
+    how: 'Recorded observed provider change and likely transcript contributors without estimating quota cost.',
+    targetFile: filePath,
+    author: 'Agent Token Tracker (Provider pacing)',
+    diff: `+ docs/tokens-consumptions/issues/${fileName}`
+  });
+
+  return { success: true, fileName, filePath, relativePath: path.join('docs', 'tokens-consumptions', 'issues', fileName), content: markdownContent, agentPrompt, guidanceRecord: record };
 }
 
 /**

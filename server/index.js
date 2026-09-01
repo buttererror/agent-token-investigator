@@ -2,14 +2,14 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { getAllSessions, getOverviewMetrics, parseSessionFile } from './parser.js';
+import { getAllSessions, getOverviewMetrics, getLatestRateLimitSnapshot, parseSessionFile } from './parser.js';
 import { runDiagnostics, calculatePacingForecast } from './analyzer.js';
 import { applyAgentsRule, applyPackageScript, createProjectSkill, undoAction } from './actionApplier.js';
 import { compileSessionHandoff } from './handoffCompiler.js';
 import { lintPrompt } from './promptLinterEngine.js';
 import { runVerificationBenchmark } from './benchmarkEngine.js';
 import { logGuidanceChange, getGuidanceRecordsForProject, getTrackedProjects } from './guidanceLogger.js';
-import { generateTurnIssueReport, generateRecommendationIssueReport, listTokenIssues, readTokenIssue, deleteTokenIssue, saveTokenIssue } from './tokenIssueGenerator.js';
+import { generateTurnIssueReport, generateRecommendationIssueReport, generatePacingIssueReport, listTokenIssues, readTokenIssue, deleteTokenIssue, saveTokenIssue } from './tokenIssueGenerator.js';
 import { addCustomProject, removeCustomProject, browseDirectory, inspectDirectory } from './customProjects.js';
 
 
@@ -118,8 +118,8 @@ app.get('/api/pacing-forecast', async (req, res) => {
     }
     // getOverviewMetrics supplies a Codex-shaped fallback for generic metrics.
     // Pacing must use only a provider snapshot that was actually ingested.
-    const rateLimits = sessions.find(session => session.rateLimits)?.rateLimits ?? null;
-    const forecast = calculatePacingForecast(rateLimits, sessions);
+    const rateLimitSnapshot = getLatestRateLimitSnapshot(sessions);
+    const forecast = calculatePacingForecast(rateLimitSnapshot, sessions);
     res.json(forecast);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -327,6 +327,29 @@ app.post('/api/recommendations/generate-issue', (req, res) => {
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/pacing/generate-issue', async (req, res) => {
+  try {
+    const { projectPath, agent, workspace } = req.body;
+    if (!projectPath || projectPath === 'all') {
+      return res.status(400).json({ error: 'Select a workspace before generating a provider usage incident.' });
+    }
+    let sessions = await getAllSessions();
+    if (agent && agent !== 'all') sessions = sessions.filter((session) => (session.agentType || 'codex') === agent);
+    if (workspace && workspace !== 'all') {
+      const target = workspace.toLowerCase().replace(/[\/\\]+$/, '');
+      sessions = sessions.filter((session) => {
+        const cwd = (session.meta?.cwd || '').toLowerCase().replace(/[\/\\]+$/, '');
+        return cwd.startsWith(target) || target.startsWith(cwd);
+      });
+    }
+    const forecast = calculatePacingForecast(getLatestRateLimitSnapshot(sessions), sessions);
+    const result = generatePacingIssueReport({ projectPath, forecast });
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 

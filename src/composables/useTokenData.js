@@ -124,72 +124,8 @@ export function useTokenData() {
     };
   });
 
-  const filteredPacingForecast = computed(() => {
-    const rateLimits = filteredOverview.value?.latestRateLimit || (
-      activeAgent.value === 'antigravity' ? null : overview.value?.latestRateLimit
-    );
-    const list = filteredSessions.value || [];
-    
-    const primary = rateLimits?.primary;
-    const quotaAvailable = Number.isFinite(primary?.used_percent) && Number.isFinite(primary?.resets_at);
-    const usedPercent = quotaAvailable ? primary.used_percent : null;
-    const resetsAt = quotaAvailable ? primary.resets_at : null;
-    const nowSec = Date.now() / 1000;
-    const minutesUntilReset = quotaAvailable ? Math.max(Math.round((resetsAt - nowSec) / 60), 0) : null;
-
-    // Estimate local activity from transcript turns in the last two hours.
-    let recentTokens = 0;
-    const twoHoursAgo = nowSec - (2 * 60 * 60);
-    for (const session of list) {
-      for (const turn of session.turns || []) {
-        const timestamp = Date.parse(turn.startedAt) / 1000;
-        if (Number.isFinite(timestamp) && timestamp >= twoHoursAgo) {
-          recentTokens += turn.tokenUsage?.total_tokens || 0;
-        }
-      }
-    }
-    const burnRatePerMin = Math.round(recentTokens / 120);
-
-    if (!quotaAvailable) {
-      return {
-        quotaAvailable: false,
-        usedPercent: null,
-        minutesUntilReset: null,
-        burnRatePerMin,
-        minutesUntilExhaustion: null,
-        status: 'UNAVAILABLE',
-        advice: 'Live provider quota is unavailable in Antigravity transcript logs. Local activity is estimated from the last two hours only.'
-      };
-    }
-
-    const remainingPercent = 100 - usedPercent;
-    const minutesUntilExhaustion = remainingPercent > 0 
-      ? Math.round((remainingPercent / 100) * (250000 / Math.max(burnRatePerMin, 500)))
-      : 0;
-
-    let status = 'HEALTHY';
-    let advice = activeAgent.value === 'antigravity'
-      ? 'Antigravity pacing is sustainable. Context caching and tool telemetry are operating normally.'
-      : 'Pacing is sustainable. You have plenty of quota before the next reset.';
-
-    if (usedPercent >= 80) {
-      status = 'CRITICAL';
-      advice = `You are at ${usedPercent}% of your 5-hour limit. Pause heavy subagents for ${minutesUntilReset}m until reset.`;
-    } else if (usedPercent >= 60 && minutesUntilExhaustion < minutesUntilReset) {
-      status = 'WARNING';
-      advice = `Burn velocity (${burnRatePerMin.toLocaleString()} tok/min) may exhaust quota in ~${minutesUntilExhaustion}m. Consider switching to low reasoning effort.`;
-    }
-
-    return {
-      quotaAvailable: true,
-      usedPercent,
-      minutesUntilReset,
-      burnRatePerMin,
-      minutesUntilExhaustion,
-      status,
-      advice
-    };
-  });
+  // The API is the single pacing implementation; do not recompute quota locally.
+  const filteredPacingForecast = computed(() => pacingForecast.value);
 
 
   let pollTimer = null;
@@ -311,6 +247,7 @@ export function useTokenData() {
       }
     } catch {}
     fetchGuidanceRecords();
+    fetchAll();
   }
 
   function setAgent(type) {
@@ -321,14 +258,19 @@ export function useTokenData() {
         localStorage.setItem('agent_tracker_agent', type);
       }
     } catch {}
+    fetchAll();
   }
 
   async function fetchAll() {
     try {
+      const pacingParams = new URLSearchParams({ agent: activeAgent.value });
+      if (activeWorkspace.value && activeWorkspace.value !== 'all') {
+        pacingParams.set('workspace', activeWorkspace.value);
+      }
       const [overviewRes, sessionsRes, pacingRes, glossaryRes, projectsRes] = await Promise.all([
         fetch('/api/overview'),
         fetch('/api/sessions'),
-        fetch('/api/pacing-forecast'),
+        fetch(`/api/pacing-forecast?${pacingParams}`),
         fetch('/api/glossary'),
         fetch('/api/projects')
       ]);
