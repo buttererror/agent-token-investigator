@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue';
+import RecommendationIssuePreviewModal from './RecommendationIssuePreviewModal.vue';
 
 const props = defineProps({
   recommendation: {
@@ -34,7 +35,10 @@ const props = defineProps({
 
 const emit = defineEmits(['create-issue', 'inspect-affected', 'issue-generated', 'change-scope']);
 
-const isCreatingIssue = ref(false);
+const isDraftLoading = ref(false);
+const isPreviewModalOpen = ref(false);
+const currentDraft = ref(null);
+const draftError = ref('');
 
 const isAllProjects = computed(() => {
   return !props.activeWorkspace || props.activeWorkspace === 'all';
@@ -57,15 +61,19 @@ const formattedTokens = computed(() => {
 const affectedCount = computed(() => rec.value?.affectedCount ?? 0);
 const affectedUnit = computed(() => rec.value?.affectedUnit ?? 'affected');
 
-async function handleCreateIssue() {
-  isCreatingIssue.value = true;
+async function handleOpenPreview() {
+  if (isAllProjects.value) return;
+  isDraftLoading.value = true;
+  draftError.value = '';
   issueSuccessMessage.value = '';
+
   try {
     const action = rec.value?.actions?.[0] || {};
     const res = await fetch('/api/recommendations/generate-issue', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        mode: 'preview',
         projectPath: props.activeWorkspace,
         diagnostic: rec.value,
         action
@@ -74,20 +82,25 @@ async function handleCreateIssue() {
 
     if (res.ok) {
       const data = await res.json();
-      emit('issue-generated', data);
-      issueSuccessMessage.value = `Work order generated in ${data.relativePath || 'docs/tokens-consumptions/issues/'}`;
-      setTimeout(() => {
-        issueSuccessMessage.value = '';
-      }, 5000);
+      currentDraft.value = data;
+      isPreviewModalOpen.value = true;
     } else {
       const err = await res.json();
-      alert(`Could not create issue: ${err.error || 'Unknown error'}`);
+      draftError.value = err.error || 'Failed to generate preview draft';
     }
   } catch (err) {
-    alert(`Error creating issue: ${err.message}`);
+    draftError.value = err.message || 'Error generating preview draft';
   } finally {
-    isCreatingIssue.value = false;
+    isDraftLoading.value = false;
   }
+}
+
+function handleIssueSaved(data) {
+  emit('issue-generated', data);
+  issueSuccessMessage.value = `Work order saved to ${data.relativePath || 'docs/tokens-consumptions/issues/'}`;
+  setTimeout(() => {
+    issueSuccessMessage.value = '';
+  }, 6000);
 }
 
 function handleInspect() {
@@ -209,18 +222,22 @@ function handleInspect() {
 
         <button 
           class="btn-primary-action"
-          :disabled="isCreatingIssue || isAllProjects"
-          @click="handleCreateIssue"
+          :disabled="isDraftLoading || isAllProjects"
+          @click="handleOpenPreview"
         >
           <svg class="btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
             <path d="M10 2H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5l-3-3z"/>
             <path d="M10 2v3h3M8 7.5v4M6 9.5h4"/>
           </svg>
-          {{ isCreatingIssue ? 'Creating issue…' : 'Preview implementation issue' }}
+          {{ isDraftLoading ? 'Opening preview…' : 'Preview implementation issue' }}
         </button>
 
         <div v-if="isAllProjects" class="issue-success-note" style="color: var(--dashboard-text-muted); font-size: 0.8rem; margin-top: 8px;">
           Cannot draft issue across all projects. Select a specific project first.
+        </div>
+
+        <div v-if="draftError" class="draft-error-banner" style="color: var(--dashboard-red, #ef4444); font-size: 0.8rem; margin-top: 8px;">
+          ⚠️ {{ draftError }}
         </div>
 
         <button 
@@ -239,6 +256,15 @@ function handleInspect() {
         </div>
       </div>
     </div>
+
+    <!-- Issue Preview Modal -->
+    <RecommendationIssuePreviewModal
+      v-if="isPreviewModalOpen && currentDraft"
+      :draft="currentDraft"
+      :project-path="activeWorkspace"
+      @close="isPreviewModalOpen = false"
+      @issue-saved="handleIssueSaved"
+    />
   </div>
 </template>
 

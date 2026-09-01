@@ -399,7 +399,7 @@ ${agentPrompt}
 /**
  * Generates an Agent Work Order from an Optimizer Recommendation
  */
-export function generateRecommendationIssueReport({ projectPath, diagnostic, action }) {
+export function generateRecommendationIssueReport({ projectPath, diagnostic, action, mode = 'save' }) {
   const targetDir = getIssueDirectory(projectPath);
   const diagId = diagnostic?.id || 'diag';
   const timeStr = Date.now().toString().slice(-6);
@@ -457,21 +457,25 @@ ${action?.customPayload?.ruleText || action?.diffPreview || '// Configure lean t
    - Ensure the repository builds and linters pass with minimal output.
 `;
 
-  fs.writeFileSync(filePath, markdownContent, 'utf8');
+  let record = null;
+  if (mode === 'save') {
+    fs.writeFileSync(filePath, markdownContent, 'utf8');
 
-  const record = logGuidanceChange({
-    projectPath,
-    actionType: 'GENERATE_TOKEN_ISSUE',
-    what: `Generated Agent Work Order from Recommendation (${fileName})`,
-    why: headline,
-    how: `Created structured handoff document in docs/tokens-consumptions/issues/${fileName}`,
-    targetFile: filePath,
-    author: `Guided Optimizer`,
-    diff: `+ docs/tokens-consumptions/issues/${fileName}`
-  });
+    record = logGuidanceChange({
+      projectPath,
+      actionType: 'GENERATE_TOKEN_ISSUE',
+      what: `Generated Agent Work Order from Recommendation (${fileName})`,
+      why: headline,
+      how: `Created structured handoff document in docs/tokens-consumptions/issues/${fileName}`,
+      targetFile: filePath,
+      author: `Guided Optimizer`,
+      diff: `+ docs/tokens-consumptions/issues/${fileName}`
+    });
+  }
 
   return {
     success: true,
+    mode,
     fileName,
     filePath,
     relativePath: path.join('docs', 'tokens-consumptions', 'issues', fileName),

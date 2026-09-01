@@ -327,11 +327,11 @@ app.post('/api/generate-turn-issue', (req, res) => {
 
 app.post('/api/recommendations/generate-issue', (req, res) => {
   try {
-    const { projectPath, diagnostic, action } = req.body;
+    const { projectPath, diagnostic, action, mode = 'save' } = req.body;
     if (!diagnostic) {
       return res.status(400).json({ error: 'diagnostic is required to generate recommendation issue doc' });
     }
-    const result = generateRecommendationIssueReport({ projectPath, diagnostic, action });
+    const result = generateRecommendationIssueReport({ projectPath, diagnostic, action, mode });
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
