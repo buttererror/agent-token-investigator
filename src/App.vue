@@ -13,6 +13,7 @@ import GuideDrawer from './components/GuideDrawer.vue';
 import ActionPromptLinterModal from './components/ActionPromptLinterModal.vue';
 import ActionHandoffModal from './components/ActionHandoffModal.vue';
 import ActionSkillGeneratorModal from './components/ActionSkillGeneratorModal.vue';
+import BenchmarkModal from './components/BenchmarkModal.vue';
 
 const {
   rawOverview,
@@ -39,6 +40,7 @@ const isGuideOpen = ref(false);
 const isLinterOpen = ref(false);
 const isHandoffOpen = ref(false);
 const isSkillGenOpen = ref(false);
+const isBenchmarkOpen = ref(false);
 const activeInspectSession = ref(null);
 
 function handleInspect(session) {
@@ -65,6 +67,7 @@ function toggleRefresh() {
       @toggle-refresh="toggleRefresh"
       @open-guide="isGuideOpen = true"
       @open-linter="isLinterOpen = true"
+      @open-benchmark="isBenchmarkOpen = true"
     />
 
     <!-- Global State & Scope Filter Toolbar -->
@@ -146,6 +149,12 @@ function toggleRefresh() {
       :is-open="isSkillGenOpen"
       :active-workspace="activeWorkspace"
       @close="isSkillGenOpen = false"
+    />
+
+    <BenchmarkModal 
+      :is-open="isBenchmarkOpen"
+      :active-workspace="activeWorkspace"
+      @close="isBenchmarkOpen = false"
     />
   </div>
 </template>

@@ -38,6 +38,13 @@ defineEmits(['toggle-refresh', 'open-guide', 'open-linter']);
     <div class="header-right">
       <button 
         class="btn btn-secondary btn-sm"
+        @click="$emit('open-benchmark')"
+      >
+        <span>⚡</span> Live Benchmark
+      </button>
+
+      <button 
+        class="btn btn-secondary btn-sm"
         @click="$emit('open-linter')"
       >
         <span>🔍</span> Prompt Linter

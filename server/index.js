@@ -7,6 +7,7 @@ import { runDiagnostics, calculatePacingForecast } from './analyzer.js';
 import { applyAgentsRule, applyPackageScript, createProjectSkill, undoAction } from './actionApplier.js';
 import { compileSessionHandoff } from './handoffCompiler.js';
 import { lintPrompt } from './promptLinterEngine.js';
+import { runVerificationBenchmark } from './benchmarkEngine.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -99,18 +100,32 @@ app.get('/api/generate-handoff/:id', async (req, res) => {
   }
 });
 
-// 7. Action 5: Pre-Flight Prompt Token Linter
+// 7. Action 5: Prompt linter
 app.post('/api/lint-prompt', (req, res) => {
   try {
     const { prompt } = req.body;
-    const result = lintPrompt(prompt || '');
+    if (!prompt) {
+      return res.status(400).json({ error: 'Prompt text is required' });
+    }
+    const result = lintPrompt(prompt);
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// 8. Action 1: Apply rule to AGENTS.md
+// 8. Live Verification Benchmark (Sequential vs. Skill)
+app.get('/api/run-benchmark', (req, res) => {
+  try {
+    const { targetProjectPath = '/home/ellol/solutions/clinic-platform', contextSize = 174500 } = req.query;
+    const results = runVerificationBenchmark(targetProjectPath, parseInt(contextSize, 10) || 174500);
+    res.json(results);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 9. Action 1: Apply rule to AGENTS.md
 app.post('/api/apply-agents-rule', (req, res) => {
   try {
     const { targetProjectPath = '/home/ellol/solutions/clinic-platform', ruleText } = req.body;
