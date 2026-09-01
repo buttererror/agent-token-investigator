@@ -194,44 +194,88 @@ function formatToolArg(input) {
 
         <div v-if="showBestPractices" class="practices-body">
           <div class="strategy-grid">
+            <!-- Strat 1 -->
             <div class="strat-item">
               <div class="strat-title">
                 <span class="strat-num">1</span>
-                <strong>Scope Tool Invocations</strong>
+                <strong>Scope Tool Invocations (Targeted Test Runs)</strong>
               </div>
               <p class="strat-desc">
-                Never run unrestricted test suites in chat. Prompt with <code>pnpm test -- --bail 1 --silent</code> so failing runs return only 1 error line instead of 40 pages of logs.
+                Never run full monorepo test suites in chat. Filter directly to your active feature and bail immediately on failure.
               </p>
+              <div class="example-box">
+                <div class="ex-bad">
+                  <span class="ex-lbl text-red">❌ Noisy (Dumps 35k tokens):</span>
+                  <code>pnpm test</code>
+                </div>
+                <div class="ex-good">
+                  <span class="ex-lbl text-green">✅ Lean (Under 400 tokens):</span>
+                  <code>pnpm --filter @clinic/admin test -- PatientsPage.test.tsx --bail 1 --silent</code>
+                </div>
+              </div>
             </div>
 
+            <!-- Strat 2 -->
             <div class="strat-item">
               <div class="strat-title">
                 <span class="strat-num">2</span>
-                <strong>Target File Slices</strong>
+                <strong>Target File Slices Instead of Full File Reads</strong>
               </div>
               <p class="strat-desc">
-                Instruct the agent to use <code>grep_search</code> and read line ranges (e.g. lines 15–45) rather than loading entire 1,000-line files into the prompt.
+                Instruct the agent to search for symbols or specify line ranges rather than loading entire components into context.
               </p>
+              <div class="example-box">
+                <div class="ex-bad">
+                  <span class="ex-lbl text-red">❌ Noisy (Reads 450 lines):</span>
+                  <code>view_file apps/admin/src/features/patients/PatientsPage.tsx</code>
+                </div>
+                <div class="ex-good">
+                  <span class="ex-lbl text-green">✅ Lean (Reads 45 lines):</span>
+                  <code>grep_search query: "handlePatientSubmit" + view_file StartLine: 40 EndLine: 85</code>
+                </div>
+              </div>
             </div>
 
+            <!-- Strat 3 -->
             <div class="strat-item">
               <div class="strat-title">
                 <span class="strat-num">3</span>
                 <strong>Single-Objective Atomic Turns</strong>
               </div>
               <p class="strat-desc">
-                Ask for one concrete slice at a time. Multi-part prompts trigger 15+ tool calls in one turn, creating massive un-cached turn bloat.
+                Ask for one concrete vertical slice per turn. Broad prompts trigger 15+ tool calls in one turn, creating massive un-cached turn bloat.
               </p>
+              <div class="example-box">
+                <div class="ex-bad">
+                  <span class="ex-lbl text-red">❌ Bloated Multi-Task Prompt:</span>
+                  <div class="ex-text">"Fix patient creation, create NestJS DTOs, update Prisma schema, and test the UI."</div>
+                </div>
+                <div class="ex-good">
+                  <span class="ex-lbl text-green">✅ Lean Atomic Turn:</span>
+                  <div class="ex-text">"Add the phone validation regex in `apps/api/src/patients/dto/create-patient.dto.ts` and verify with unit tests."</div>
+                </div>
+              </div>
             </div>
 
+            <!-- Strat 4 -->
             <div class="strat-item">
               <div class="strat-title">
                 <span class="strat-num">4</span>
-                <strong>Preserve Prompt Prefixes</strong>
+                <strong>Preserve Prompt Prefixes with AGENTS.md & Skills</strong>
               </div>
               <p class="strat-desc">
-                OpenAI caches prompt context from top to bottom. Keep instructions in <code>AGENTS.md</code> and <code>.agents/skills/</code> to ensure 85%+ cache reuse on every follow-up.
+                OpenAI caches prompts from top to bottom. Keeping rules in <code>AGENTS.md</code> or <code>.agents/skills/</code> guarantees 90%+ cache hit rate on all follow-up turns.
               </p>
+              <div class="example-box">
+                <div class="ex-bad">
+                  <span class="ex-lbl text-red">❌ Cache Busted:</span>
+                  <div class="ex-text">Typing 30 lines of coding preferences into chat on every prompt.</div>
+                </div>
+                <div class="ex-good">
+                  <span class="ex-lbl text-green">✅ 95% Cache Reuse:</span>
+                  <div class="ex-text">Rules stored permanently in <code>AGENTS.md</code> + invoking <code>$verify-slice</code> skill.</div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -505,6 +549,48 @@ function formatToolArg(input) {
   padding: 2px 4px;
   border-radius: 4px;
   color: var(--accent-yellow);
+}
+
+.example-box {
+  margin-top: 10px;
+  background-color: #0b0f19;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ex-bad, .ex-good {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ex-lbl {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.example-box code {
+  font-size: 0.72rem;
+  background-color: var(--bg-input);
+  padding: 4px 8px;
+  border-radius: 4px;
+  color: var(--text-main);
+  word-break: break-all;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+
+.ex-text {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  background-color: var(--bg-input);
+  padding: 4px 8px;
+  border-radius: 4px;
+  line-height: 1.3;
 }
 
 /* Turns Timeline */
