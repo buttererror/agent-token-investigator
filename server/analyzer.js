@@ -461,45 +461,56 @@ export function calculatePacingForecast(rateLimitSnapshot, sessions) {
   const rateLimits = rateLimitSnapshot?.snapshot || rateLimitSnapshot || null;
   const primary = rateLimits?.primary;
   const secondary = rateLimits?.secondary;
-  const quotaAvailable = Number.isFinite(primary?.used_percent) && Number.isFinite(primary?.resets_at);
+  const quotaAvailable = Boolean(
+    (primary && Number.isFinite(primary.used_percent)) ||
+    (secondary && Number.isFinite(secondary.used_percent))
+  );
   const snapshotAt = Number.isFinite(rateLimitSnapshot?.timestamp) ? rateLimitSnapshot.timestamp : null;
   const snapshotAgeMinutes = snapshotAt === null ? null : Math.max(Math.round((Date.now() - snapshotAt) / 60000), 0);
-  const snapshotIsFresh = snapshotAgeMinutes !== null && snapshotAgeMinutes <= 5;
 
-  let windows = [];
-  if (quotaAvailable) {
-    if (primary) {
-      windows.push({
-        id: 'primary',
-        label: '5-hour limit',
-        usedPercent: primary.used_percent,
-        resetsAt: new Date(primary.resets_at * 1000).toISOString()
-      });
-    }
-    if (secondary) {
-      windows.push({
-        id: 'secondary',
-        label: 'Weekly rolling limit',
-        usedPercent: secondary.used_percent,
-        resetsAt: secondary.resets_at ? new Date(secondary.resets_at * 1000).toISOString() : null
-      });
-    }
-  }
-
-  if (!quotaAvailable || !snapshotIsFresh) {
+  if (!quotaAvailable) {
     return {
       available: false,
       status: 'UNAVAILABLE',
       headline: 'Provider quota is unavailable',
       observedAt: snapshotAt ? new Date(snapshotAt).toISOString() : null,
       windows: [],
-      advice: snapshotAt
-        ? `The latest provider quota snapshot is ${snapshotAgeMinutes}m old, so current quota is unavailable.`
-        : 'Live provider quota is unavailable in transcript logs.'
+      advice: 'Live provider quota is unavailable in transcript logs.'
     };
   }
 
-  const maxUsed = Math.max(primary?.used_percent || 0, secondary?.used_percent || 0);
+  const windows = [];
+  if (primary && Number.isFinite(primary.used_percent)) {
+    let resetsAtIso = null;
+    if (Number.isFinite(primary.resets_at)) {
+      const ms = primary.resets_at < 1e11 ? primary.resets_at * 1000 : primary.resets_at;
+      resetsAtIso = new Date(ms).toISOString();
+    }
+    windows.push({
+      id: 'primary',
+      label: '5-hour limit',
+      usedPercent: primary.used_percent,
+      resetsAt: resetsAtIso
+    });
+  }
+
+  if (secondary && Number.isFinite(secondary.used_percent)) {
+    let resetsAtIso = null;
+    if (Number.isFinite(secondary.resets_at)) {
+      const ms = secondary.resets_at < 1e11 ? secondary.resets_at * 1000 : secondary.resets_at;
+      resetsAtIso = new Date(ms).toISOString();
+    }
+    windows.push({
+      id: 'secondary',
+      label: 'Weekly rolling limit',
+      usedPercent: secondary.used_percent,
+      resetsAt: resetsAtIso
+    });
+  }
+
+  const primaryPct = primary && Number.isFinite(primary.used_percent) ? primary.used_percent : 0;
+  const secondaryPct = secondary && Number.isFinite(secondary.used_percent) ? secondary.used_percent : 0;
+  const maxUsed = Math.max(primaryPct, secondaryPct);
 
   let status = 'SUSTAINABLE';
   let headline = 'Usage is sustainable';
@@ -520,6 +531,7 @@ export function calculatePacingForecast(rateLimitSnapshot, sessions) {
     status,
     headline,
     observedAt: snapshotAt ? new Date(snapshotAt).toISOString() : null,
+    snapshotAgeMinutes,
     windows,
     advice
   };
