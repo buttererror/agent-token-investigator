@@ -10,7 +10,7 @@ The diagnostic engine ([`server/analyzer.js`](file:///home/ellol/apps/agent-toke
 | :---: | :--- | :--- | :--- |
 | **Action 1** | **AGENTS.md Rule Injection** | `AGENTS.md` | Injects progressive disclosure rules, low reasoning defaults, and turn boundaries. |
 | **Action 2** | **Package Quiet Script** | `package.json` | Adds `"test:agent": "... --bail=1 --silent"` to suppress noisy green assertion output. |
-| **Action 3** | **Project Skill Generator** | `.agents/skills/<name>/SKILL.md` | Encapsulates complex repetitive multi-turn verification workflows into a single tool invocation. |
+| **Action 3** | **Project Skill Generator** | `.agents/skills/<name>/SKILL.md` | Encapsulates complex repetitive multi-turn verification workflows. Narrow, broadly safe skills with clear triggers may invoke automatically; broad or specialized skills stay explicit-only. |
 | **Action 4** | **State-Preserving Session Handoff** | UI Handoff Modal | Compiles thread goals, modified files, and decisions into a 1-turn prompt saving ~85% input context. |
 | **Action 5** | **Pre-Flight Prompt Linter** | UI Prompt Linter | Identifies token expansion anti-patterns before sending prompts to the agent. |
 | **Action 6** | **Atomic Undo / Rollback** | `.backups/` | Reverts any automated rule or script change with 1-click safety. |
@@ -34,9 +34,11 @@ graph LR
 Every generated markdown file contains:
 1. **🤖 Kickoff Prompt**: A ready-to-use prompt linking `@docs/tokens-consumptions/issues/issue-*.md` with explicit task boundaries.
 2. **📊 Telemetry Snapshot**: Exact numbers for `In`, `Cache`, `Think`, `Out`, duration, and tool count.
-3. **🚨 Root Cause & Anti-Pattern Analysis**: Explains the exact mechanism of waste (unconstrained reads, verbose test dumps).
+3. **🚨 Root Cause & Anti-Pattern Analysis**: Explains only observed evidence: test commands missing quiet flags, file-read requests missing ranges, or high reasoning on likely routine work. It does not infer waste merely because a session exists.
 4. **🛠️ Step-by-Step Resolution Plan**: Precise file targets (`AGENTS.md`, `package.json`), rule text snippets, and silent test commands.
 5. **❌ / ✅ Bad vs. Good Code Examples**: Concrete syntax examples for progressive disclosure.
+
+Efficient turns have no corrective action or issue-generation control. The UI offers work orders only when a turn has an evidence-backed recommendation.
 
 ---
 

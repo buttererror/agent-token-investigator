@@ -18,6 +18,22 @@ let lastSessionsCache = null;
 let lastSessionsCacheTime = 0;
 const SESSIONS_CACHE_TTL_MS = 3000;
 
+function sumTurnUsage(turns) {
+  const fields = ['input_tokens', 'cached_input_tokens', 'output_tokens', 'reasoning_output_tokens', 'total_tokens'];
+  const totals = Object.fromEntries(fields.map((field) => [field, 0]));
+  let hasMeasuredTurnUsage = false;
+
+  for (const turn of turns) {
+    if (!turn.tokenUsage) continue;
+    hasMeasuredTurnUsage = true;
+    for (const field of fields) {
+      totals[field] += turn.tokenUsage[field] || 0;
+    }
+  }
+
+  return hasMeasuredTurnUsage ? totals : null;
+}
+
 /**
  * Reads session_index.jsonl to map session_id to thread_name (cached by mtime)
  */
@@ -217,6 +233,11 @@ export async function parseSessionFile(filePath) {
   }
 
   const sessionId = sessionMeta?.sessionId || path.basename(filePath).replace('.jsonl', '');
+  // The timeline displays last_token_usage for each turn. Aggregate those same
+  // measurements for the session card so its totals always reconcile with the
+  // visible turns. latestTotalUsage is retained only for sessions with no
+  // turn-level telemetry.
+  const turnUsageTotal = sumTurnUsage(turns);
   const parsedSession = {
     filePath,
     fileSize: stat.size,
@@ -235,7 +256,7 @@ export async function parseSessionFile(filePath) {
       }),
       agentType: 'codex'
     },
-    totalUsage: latestTotalUsage || {
+    totalUsage: turnUsageTotal || latestTotalUsage || {
       input_tokens: 0,
       cached_input_tokens: 0,
       output_tokens: 0,

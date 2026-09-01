@@ -8,6 +8,32 @@ if (!fs.existsSync(BACKUP_DIR)) {
   fs.mkdirSync(BACKUP_DIR, { recursive: true });
 }
 
+function normalizeRuleText(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/[`*_]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function hasEquivalentRule(content, ruleText) {
+  const normalizedRule = normalizeRuleText(ruleText);
+  return Boolean(normalizedRule) && normalizeRuleText(content).includes(normalizedRule);
+}
+
+function appendRuleToOptimizationSection(content, ruleText) {
+  const sectionPattern = /(^## Token Optimization Rules\s*$)([\s\S]*?)(?=^##\s|\s*$)/m;
+  const rule = ruleText.trim();
+  if (!sectionPattern.test(content)) {
+    return content.trimEnd() + `\n\n## Token Optimization Rules\n${rule}\n`;
+  }
+
+  return content.replace(sectionPattern, (_match, heading, body) => {
+    return `${heading}${body.trimEnd()}\n${rule}\n`;
+  });
+}
+
 /**
  * Creates an atomic backup of a file before modifying it
  */
@@ -29,15 +55,28 @@ function createBackup(filePath) {
  */
 export function applyAgentsRule(targetProjectPath, ruleText, options = {}) {
   const agentsPath = path.join(targetProjectPath, 'AGENTS.md');
-  const backup = createBackup(agentsPath);
+  const content = fs.existsSync(agentsPath) ? fs.readFileSync(agentsPath, 'utf8') : '# Agent Guide\n';
 
-  let content = fs.existsSync(agentsPath) ? fs.readFileSync(agentsPath, 'utf8') : '# Agent Guide\n';
-
-  // Check if rule already exists to avoid duplication
-  if (!content.includes(ruleText.trim())) {
-    content = content.trimEnd() + '\n\n## Token Optimization Rules\n' + ruleText.trim() + '\n';
-    fs.writeFileSync(agentsPath, content, 'utf8');
+  if (!ruleText?.trim()) {
+    throw new Error('A non-empty AGENTS.md rule is required.');
   }
+
+  // Check before creating a backup, writing, or logging. Formatting-only
+  // differences (such as Markdown backticks) must not create duplicate rules.
+  if (hasEquivalentRule(content, ruleText)) {
+    return {
+      success: true,
+      alreadyApplied: true,
+      action: 'APPLY_AGENTS_RULE',
+      targetFile: agentsPath,
+      backup: null,
+      guidanceRecord: null,
+      message: 'Equivalent rule is already active; no file change was made.'
+    };
+  }
+
+  const backup = createBackup(agentsPath);
+  fs.writeFileSync(agentsPath, appendRuleToOptimizationSection(content, ruleText), 'utf8');
 
   const record = logGuidanceChange({
     projectPath: targetProjectPath,
@@ -57,6 +96,7 @@ export function applyAgentsRule(targetProjectPath, ruleText, options = {}) {
     targetFile: agentsPath,
     backup,
     guidanceRecord: record,
+    alreadyApplied: false,
     message: `Successfully injected rule into ${agentsPath}`
   };
 }

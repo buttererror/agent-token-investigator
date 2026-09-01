@@ -16,6 +16,30 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'export-handoff', 'guidance-updated']);
 
+function isNoisyTestInvocation(toolCall) {
+  const input = toolCall?.input;
+  const command = typeof input === 'string' ? input : String(input?.cmd || input?.command || '');
+  const isTestCommand = /(?:^|[;&|]\s*)(?:(?:pnpm|npm|yarn|bun)\b[^\n]*\b(?:test(?::[\w-]+)?|jest|vitest|mocha|ava)\b|(?:jest|vitest|mocha|ava|pytest)\b)/i.test(command);
+  return /(?:exec_command|run_command|\bexec\b)/i.test(String(toolCall?.tool || ''))
+    && isTestCommand
+    && !(/--silent/.test(command) && /--bail(?:\s+|=)1\b/.test(command));
+}
+
+function hasUnboundedFileRead(toolCall) {
+  if (!/(?:view_file|read_file)/i.test(String(toolCall?.tool || ''))) return false;
+  const input = toolCall?.input;
+  if (typeof input === 'string') return !/\b(?:start_?line|end_?line|fromLine|toLine)\b/i.test(input);
+  if (!input || typeof input !== 'object') return true;
+  const keys = Object.keys(input).map((key) => key.toLowerCase());
+  return !keys.some((key) => ['startline', 'endline', 'start_line', 'end_line', 'fromline', 'toline'].includes(key));
+}
+
+function isLikelyRoutineTurn(turn, hasNoisyTests, hasUnboundedRead) {
+  const prompt = `${turn?.userPrompt || ''} ${turn?.assistantMessage || ''}`;
+  return !hasNoisyTests && !hasUnboundedRead && (turn?.toolCalls?.length || 0) <= 2
+    && /\b(?:docs?|documentation|format(?:ting)?|rename|typo|read|review|status|list)\b/i.test(prompt);
+}
+
 const { isApplying, applyAction, undoLastAction } = useActionSelector();
 
 const showBestPractices = ref(false);
@@ -34,6 +58,10 @@ const cacheRate = computed(() => {
   return Math.round((cached / inp) * 100);
 });
 
+const actionableTurnCount = computed(() => {
+  return (props.session?.turns || []).filter(isActionableTurn).length;
+});
+
 function getTurnActions(turn) {
   const actions = [];
   const inp = turn.tokenUsage?.input_tokens || 0;
@@ -41,13 +69,12 @@ function getTurnActions(turn) {
   const fresh = Math.max(inp - cached, 0);
   const think = turn.tokenUsage?.reasoning_output_tokens || 0;
   const toolCount = turn.toolCalls?.length || 0;
-  const hasTests = turn.toolCalls?.some(tc => {
-    const s = JSON.stringify(tc || '').toLowerCase();
-    return s.includes('test') || s.includes('vitest') || s.includes('jest');
-  });
+  const hasNoisyTests = turn.toolCalls?.some(isNoisyTestInvocation);
+  const hasUnboundedRead = turn.toolCalls?.some(hasUnboundedFileRead);
+  const hasRoutineHighThinking = think > 1200 && isLikelyRoutineTurn(turn, hasNoisyTests, hasUnboundedRead);
 
   // Action: Test suppression
-  if (hasTests) {
+  if (hasNoisyTests) {
     actions.push({
       id: `test-script-${turn.turnNumber}`,
       type: 'script',
@@ -64,7 +91,7 @@ function getTurnActions(turn) {
   }
 
   // Action: File inspection constraints / Line ranges
-  if (fresh > 20000 || toolCount >= 4) {
+  if (hasUnboundedRead) {
     actions.push({
       id: `rule-slice-${turn.turnNumber}`,
       type: 'rule',
@@ -99,7 +126,7 @@ function getTurnActions(turn) {
   }
 
   // Action: Reasoning optimization
-  if (think > 1200) {
+  if (hasRoutineHighThinking) {
     actions.push({
       id: `rule-reasoning-${turn.turnNumber}`,
       type: 'rule',
@@ -114,23 +141,11 @@ function getTurnActions(turn) {
     });
   }
 
-  // Fallback generic guidance rule if none matched
-  if (actions.length === 0) {
-    actions.push({
-      id: `rule-general-${turn.turnNumber}`,
-      type: 'rule',
-      title: '📜 Add Turn Best Practice Rule to AGENTS.md',
-      badge: 'Efficiency Convention',
-      targetFile: 'AGENTS.md',
-      whatItDoes: 'Incorporate turn boundaries and progressive disclosure into AGENTS.md.',
-      whatItAchieves: `Keep future sessions aligned with Turn #${turn.turnNumber} standards.`,
-      payload: {
-        ruleText: '\n- Keep conversation turns single-objective and concise to maximize prompt cache hit rates.'
-      }
-    });
-  }
-
   return actions;
+}
+
+function isActionableTurn(turn) {
+  return getTurnActions(turn).length > 0;
 }
 
 async function handleApplyTurnAction(turn, action) {
@@ -247,8 +262,9 @@ function generateDocForTurn(turn) {
   const total = inp + out;
   const cacheHitRate = inp > 0 ? Math.round((cached / inp) * 100) : 0;
 
-  const hasTests = turn.toolCalls?.some(tc => JSON.stringify(tc || '').toLowerCase().includes('test'));
-  const hasFileSpike = fresh > 25000;
+  const hasNoisyTests = turn.toolCalls?.some(isNoisyTestInvocation);
+  const hasUnboundedRead = turn.toolCalls?.some(hasUnboundedFileRead);
+  const hasRoutineHighThinking = think > 1200 && isLikelyRoutineTurn(turn, hasNoisyTests, hasUnboundedRead);
   const hasManyTools = (turn.toolCalls?.length || 0) >= 4;
 
   let problemHeadline = 'Uncached Context Inflation & File Noise';
@@ -258,27 +274,34 @@ function generateDocForTurn(turn) {
   let goodExample = 'Using grep_search with StartLine/EndLine slices or targeted symbol inspection.';
   let resolutionRules = `- Practice progressive disclosure: always inspect targeted line ranges (StartLine/EndLine) rather than reading entire files into prompt context.`;
 
-  if (hasTests) {
+  if (hasNoisyTests) {
     problemHeadline = 'Unfiltered Test Suite Console Noise';
     problemDetails = `Executed test commands without bail or silent flags, dumping raw passing logs and stack traces (~${inp.toLocaleString()} tokens).`;
     projectedSavingsTokens = Math.round(inp * 0.95);
     badExample = '```bash\npnpm test\n# Dumps dozens of passing test logs into prompt context\n```';
     goodExample = '```bash\npnpm test -- --bail 1 --silent\n# Halts on first error, output payload < 400 tokens\n```';
     resolutionRules = `- When executing test suites, always pass \`--bail 1\` and \`--silent\` to keep context lean.\n- Add \`"test:agent": "vitest run --bail 1 --silent"\` to \`package.json\`.`;
-  } else if (hasFileSpike) {
-    problemHeadline = 'Full-File Reading Instead of Targeted Line Slices';
-    problemDetails = `Loaded entire file contents into prompt context rather than using progressive disclosure with line ranges.`;
+  } else if (hasUnboundedRead) {
+    problemHeadline = 'Unbounded File Read Request';
+    problemDetails = `Requested a file read without line-range metadata. The telemetry cannot prove the file size, so this work order targets the missing bound rather than claiming a full-file read.`;
     projectedSavingsTokens = Math.round(fresh * 0.9);
     badExample = '```bash\nview_file /path/to/LargeFile.js\n# Reads entire 800+ lines into context\n```';
     goodExample = '```bash\ngrep_search query: "targetSymbol" + view_file StartLine: 40 EndLine: 85\n# Reads only 45 relevant lines\n```';
     resolutionRules = `- Practice progressive disclosure: always inspect targeted line ranges (\`StartLine\`/\`EndLine\`) rather than reading entire files into prompt context.\n- Never read files over 200 lines in full when making localized edits.`;
+  } else if (hasRoutineHighThinking) {
+    problemHeadline = 'High Reasoning on a Likely Routine Task';
+    problemDetails = `Turn #${turnNum} used ${think.toLocaleString()} reasoning tokens while its request and tool footprint match a likely routine task. Confirm that the work is not complex before lowering reasoning effort.`;
+    projectedSavingsTokens = Math.round(think * 0.88);
+    badExample = 'Running a documentation, status, or formatting task with high reasoning effort by default.';
+    goodExample = 'Use low reasoning effort for routine work; raise it only when the task requires non-trivial investigation or design.';
+    resolutionRules = `- Use \`reasoning_effort: low\` for this kind of routine task after confirming it does not need deeper investigation.\n- Do not lower reasoning effort for complex debugging, ambiguous incidents, or architecture decisions.`;
   } else if (hasManyTools) {
     problemHeadline = 'Dense Multi-Step Tool Execution Carryover';
     problemDetails = `Executed ${turn.toolCalls.length} distinct tool calls in a single conversational turn, inflating turn payload.`;
     projectedSavingsTokens = Math.round(inp * 0.6);
     badExample = 'Prompting multi-phase architectural chores across sequential tool calls in a single unbounded turn.';
     goodExample = 'Packaging the verification sequence into a modular `.agents/skills/verify-slice/SKILL.md` skill.';
-    resolutionRules = `- Package repetitive multi-turn test/lint workflows into modular \`.agents/skills/\` with \`allow_implicit_invocation: false\`.`;
+    resolutionRules = `- Package repetitive multi-turn test/lint workflows into modular \`.agents/skills/\`.\n- Allow automatic invocation only for narrow, broadly safe skills with a clear trigger; keep broad or specialized skills explicit-only.`;
   }
 
   const agentPrompt = `Please inspect and resolve the token inefficiency documented in @docs/tokens-consumptions/issues/${fileName}. Apply the recommended rules to AGENTS.md or package.json, verify with silent flags, and ensure all changes preserve documentation integrity.`;
@@ -390,6 +413,7 @@ ${goodExample}
 }
 
 function openSingleTurnPreview(turn) {
+  if (!isActionableTurn(turn)) return;
   const item = generateDocForTurn(turn);
   previewItems.value = [item];
   activePreviewIndex.value = 0;
@@ -400,16 +424,8 @@ function openSingleTurnPreview(turn) {
 
 function openAllTurnsPreview() {
   const allTurns = props.session?.turns || [];
-  // Candidate turns meeting optimization threshold, or all turns if few
-  let candidates = allTurns.filter(t => 
-    (t.noiseSpikes?.length > 0) || 
-    ((t.tokenUsage?.input_tokens - t.tokenUsage?.cached_input_tokens) > 15000) ||
-    (t.toolCalls?.length >= 3)
-  );
-
-  if (candidates.length === 0) {
-    candidates = allTurns;
-  }
+  const candidates = allTurns.filter(isActionableTurn);
+  if (candidates.length === 0) return;
 
   previewItems.value = candidates.map(t => generateDocForTurn(t));
   activePreviewIndex.value = 0;
@@ -713,7 +729,7 @@ function formatToolArg(input) {
           <span class="session-path mono text-dim text-xs">{{ session?.meta?.cwd || '' }} • {{ session?.meta?.model || 'codex' }} • {{ session?.sessionId }}</span>
         </div>
         <div class="head-actions">
-          <div class="action-btn-group">
+          <div v-if="actionableTurnCount > 0" class="action-btn-group">
             <button 
               class="btn btn-secondary btn-sm"
               @click="openAllTurnsPreview"
@@ -1004,7 +1020,7 @@ function formatToolArg(input) {
           </div>
 
           <!-- In-Turn Actions & Guidance Logger Section -->
-          <div class="turn-actions-card">
+          <div v-if="isActionableTurn(turn)" class="turn-actions-card">
             <div class="turn-actions-header">
               <span class="turn-actions-title">⚡ Turn #{{ turn.turnNumber }} Actions & Guidance:</span>
               <button 

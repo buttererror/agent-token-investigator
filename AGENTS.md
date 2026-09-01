@@ -66,7 +66,7 @@ The diagnostic engine ([`server/analyzer.js`](server/analyzer.js)) and action ap
 
 1. **Action 1 (AGENTS Rule Injection)**: Injects durable token-saving conventions into `AGENTS.md` when repeated waste is detected across threads.
 2. **Action 2 (Package Scripts)**: Adds lean test and verification scripts (e.g. `"test:agent"`) to `package.json` to prevent console noise.
-3. **Action 3 (Project Skills)**: Generates progressive disclosure skills in `.agents/skills/` to encapsulate complex workflows into single invocation triggers.
+3. **Action 3 (Project Skills)**: Generates progressive-disclosure skills in `.agents/skills/` to encapsulate complex workflows. Narrow, broadly safe skills with clear triggers may allow automatic invocation; broad or specialized skills remain explicit-only.
 4. **Action 4 (Session Handoff)**: Compiles structured handoffs when thread length exceeds optimal cache windows.
 5. **Action 5 (Prompt Linter)**: Lints prompt structures against standard anti-patterns (e.g. full-file request dumps, unconstrained outputs).
 6. **Action 7 (Pacing Forecast)**: Evaluates 5-hour rolling consumption rates to prevent rate limit starvation.
@@ -86,4 +86,5 @@ The diagnostic engine ([`server/analyzer.js`](server/analyzer.js)) and action ap
 - [ ] **Synchronize Multi-Project Rules**: Ensure project-specific `AGENTS.md` across workspaces reflect latest best practices.
 
 ## Token Optimization Rules
-- Practice progressive disclosure: always inspect targeted line ranges (StartLine/EndLine) rather than reading entire files into prompt context.
+- Practice progressive disclosure: always inspect targeted line ranges (`StartLine`/`EndLine`) rather than reading entire files into prompt context.
+- Keep conversation turns single-objective and concise to maximize prompt cache hit rates.

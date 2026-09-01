@@ -94,13 +94,15 @@ interface NormalizedSession {
     startedAt: string;
     userPrompt: string;
     assistantMessage: string;
-    toolCalls: Array<{ tool: string; input: any }>;
+    toolCalls: Array<{ tool: string; input: any }>; // Range metadata in input distinguishes bounded from unbounded file reads.
     noiseSpikes: Array<{ type: string; message: string }>;
     durationMs: number;
     tokenUsage: TokenUsage;
   }>;
 }
 ```
+
+Session totals are the sum of the displayed turn-level token measurements. This keeps the session card, charts, and turn timeline reconcilable; a cumulative parser snapshot is used only when no turn-level measurement is available.
 
 ---
 

@@ -425,7 +425,7 @@ app.get('/api/glossary', (req, res) => {
       category: 'Architecture',
       description: 'An architectural pattern where only concise metadata/summaries are presented initially, with full details loaded only on explicit demand.',
       whyItMatters: 'Prevents loading every rule and document into every prompt, keeping baseline context tiny.',
-      tip: 'Package specialized workflows into `.agents/skills/` with `allow_implicit_invocation: false`.'
+      tip: 'Package specialized workflows into `.agents/skills/`; allow automatic invocation only for narrow, broadly safe skills with clear triggers.'
     }
   ]);
 });

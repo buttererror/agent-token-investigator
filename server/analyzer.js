@@ -2,6 +2,50 @@ import fs from 'fs';
 import path from 'path';
 import { loadGuidanceRecords } from './guidanceLogger.js';
 
+const TEST_COMMAND_PATTERN = /(?:^|[;&|]\s*)(?:(?:pnpm|npm|yarn|bun)\b[^\n]*\b(?:test(?::[\w-]+)?|jest|vitest|mocha|ava)\b|(?:jest|vitest|mocha|ava|pytest)\b)/i;
+const ROUTINE_TASK_PATTERN = /\b(?:docs?|documentation|format(?:ting)?|rename|typo|read|review|status|list)\b/i;
+
+function normalizeRuleText(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/[`*_]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function commandFromTool(tool) {
+  const input = tool?.input;
+  if (typeof input === 'string') return input;
+  if (input && typeof input === 'object') return String(input.cmd || input.command || '');
+  return '';
+}
+
+function hasLineRange(input) {
+  if (!input) return false;
+  if (typeof input === 'string') return /\b(?:start_?line|end_?line|fromLine|toLine)\b/i.test(input);
+  if (typeof input !== 'object') return false;
+  const keys = Object.keys(input).map((key) => key.toLowerCase());
+  return keys.some((key) => ['startline', 'endline', 'start_line', 'end_line', 'fromline', 'toline'].includes(key));
+}
+
+export function isNoisyTestInvocation(tool) {
+  const name = String(tool?.tool || '');
+  if (!/(?:exec_command|run_command|\bexec\b)/i.test(name)) return false;
+  const command = commandFromTool(tool);
+  return TEST_COMMAND_PATTERN.test(command) && !(/--silent/.test(command) && /--bail(?:\s+|=)1\b/.test(command));
+}
+
+export function isUnboundedFileRead(tool) {
+  return /(?:view_file|read_file)/i.test(String(tool?.tool || '')) && !hasLineRange(tool.input);
+}
+
+export function isLikelyRoutineTurn(turn) {
+  const toolCount = turn?.toolCalls?.length || 0;
+  const prompt = `${turn?.userPrompt || ''} ${turn?.assistantMessage || ''}`;
+  return toolCount <= 2 && ROUTINE_TASK_PATTERN.test(prompt);
+}
+
 /**
  * Checks if an action was added / recorded in guidance history logs
  */
@@ -49,13 +93,10 @@ export function checkActionStatus(targetProjectPath, action) {
       const agentsPath = path.join(targetProjectPath, 'AGENTS.md');
       if (fs.existsSync(agentsPath)) {
         const content = fs.readFileSync(agentsPath, 'utf-8');
-        if (action.payload?.ruleText && content.includes(action.payload.ruleText.trim())) {
+        if (action.payload?.ruleText && normalizeRuleText(content).includes(normalizeRuleText(action.payload.ruleText))) {
           return true;
         }
         if (action.systemId === 6 && content.includes('reasoning_effort: low')) {
-          return true;
-        }
-        if (action.systemId === 1 && content.includes('--bail 1')) {
           return true;
         }
       }
@@ -152,6 +193,8 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
   let noisyFileTurns = 0;
   let wastedTokensTest = 0;
   let wastedTokensFile = 0;
+  let routineHighReasoningTurns = 0;
+  let routineHighReasoningTokens = 0;
   let bloatedSessionsCount = 0;
   let wastedTokensBloat = 0;
 
@@ -168,18 +211,20 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
       }
 
       for (const tool of (turn.toolCalls || [])) {
-        const toolName = tool.tool || '';
-        const inputStr = JSON.stringify(tool.input || '');
-        if (toolName.includes('exec_command') || toolName.includes('run_command') || toolName.includes('exec')) {
-          if (inputStr.includes('test') || inputStr.includes('jest') || inputStr.includes('vitest')) {
-            noisyTestTurns++;
-            wastedTokensTest += 22000;
-          }
+        if (isNoisyTestInvocation(tool)) {
+          noisyTestTurns++;
+          wastedTokensTest += 22000;
         }
-        if (toolName.includes('view_file') || toolName.includes('read_file')) {
+        if (isUnboundedFileRead(tool)) {
           noisyFileTurns++;
           wastedTokensFile += 7500;
         }
+      }
+
+      const reasoningTokens = turn.tokenUsage?.reasoning_output_tokens || 0;
+      if (reasoningTokens > 1200 && isLikelyRoutineTurn(turn)) {
+        routineHighReasoningTurns++;
+        routineHighReasoningTokens += reasoningTokens;
       }
     }
   }
@@ -202,8 +247,8 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
   }
 
   // Diagnostic 1: Test & Terminal Command Payload Noise
-  if (noisyTestTurns > 0 || wastedTokensTest > 0 || targetSessions.length > 0) {
-    const totalWasted = Math.max(wastedTokensTest, targetSessions.length > 0 ? 35000 : 0);
+  if (noisyTestTurns > 0) {
+    const totalWasted = wastedTokensTest;
     const quotaPercent = Math.min(Math.round((totalWasted / 250000) * 100), 85);
 
     const diag = {
@@ -211,7 +256,7 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
       category: 'PAYLOAD_NOISE',
       severity: 'HIGH',
       title: 'Unfiltered Test Suite Console Noise',
-      headline: `Detected ${noisyTestTurns || 2} test executions dumping raw console logs and stack traces within ${scopeLabel}.`,
+      headline: `Detected ${noisyTestTurns} test command(s) without both --bail 1 and --silent within ${scopeLabel}.`,
       quantifiedWaste: {
         tokensWasted: totalWasted,
         quotaPercent,
@@ -277,21 +322,21 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
   }
 
   // Diagnostic 2: Full-File Loading vs Targeted Slices
-  if (noisyFileTurns > 0 || wastedTokensFile > 0 || targetSessions.length > 0) {
-    const totalWasted = Math.max(wastedTokensFile, targetSessions.length > 0 ? 28000 : 0);
+  if (noisyFileTurns > 0) {
+    const totalWasted = wastedTokensFile;
     const quotaPercent = Math.min(Math.round((totalWasted / 250000) * 100), 55);
 
     const diag = {
       id: 'diag-file-reads',
       category: 'CONTEXT_BLOAT',
       severity: 'MEDIUM',
-      title: 'Full-File Reading on Large Codebases',
-      headline: `Codex loaded full files (>200 lines) instead of targeted line ranges or grep searches in ${scopeLabel}.`,
+      title: 'Unbounded File Read Requests',
+      headline: `Detected ${noisyFileTurns} file read request(s) without line-range metadata in ${scopeLabel}.`,
       quantifiedWaste: {
         tokensWasted: totalWasted,
         quotaPercent,
         projectedWeeklySavings: totalWasted * 5,
-        description: `Full file reads consumed ~${totalWasted.toLocaleString()} tokens across turns, taking ~${quotaPercent}% of your 5-hour quota.`
+        description: `Unbounded file read requests are estimated to have consumed ~${totalWasted.toLocaleString()} tokens across turns, taking ~${quotaPercent}% of your 5-hour quota.`
       },
       whatIfSimulation: {
         beforeTokens: totalWasted,
@@ -393,21 +438,22 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
   }
 
   // Diagnostic 4: Reasoning Effort Right-Sizing
-  const diagReasoning = {
+  if (routineHighReasoningTurns > 0) {
+    const diagReasoning = {
     id: 'diag-reasoning-roi',
     category: 'MODEL_RIGHT_SIZING',
     severity: 'LOW',
     title: 'Reasoning Effort & Task Right-Sizing',
-    headline: `Downshift reasoning effort on routine chores, docs, and test runs in ${scopeLabel}.`,
+    headline: `Detected ${routineHighReasoningTurns} likely routine turn(s) with high reasoning-token use in ${scopeLabel}.`,
     quantifiedWaste: {
-      tokensWasted: 25000,
-      quotaPercent: 10,
-      projectedWeeklySavings: 100000,
-      description: 'Using high reasoning effort on simple tasks consumes expensive thinking quota with no quality gain.'
+      tokensWasted: routineHighReasoningTokens,
+      quotaPercent: Math.min(Math.round((routineHighReasoningTokens / 250000) * 100), 85),
+      projectedWeeklySavings: routineHighReasoningTokens * 4,
+      description: 'Likely routine work used high reasoning-token volume; confirm task complexity before lowering effort.'
     },
     whatIfSimulation: {
-      beforeTokens: 25000,
-      afterTokens: 3000,
+      beforeTokens: routineHighReasoningTokens,
+      afterTokens: Math.round(routineHighReasoningTokens * 0.12),
       savedPercent: 88,
       forecast: 'Using low reasoning effort for chores saves ~22,000 reasoning tokens per week for complex debugging.'
     },
@@ -427,9 +473,10 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
         }
       }
     ]
-  };
+    };
 
-  diagnostics.push(annotateDiagnostic(diagReasoning));
+    diagnostics.push(annotateDiagnostic(diagReasoning));
+  }
 
   return {
     scope: {

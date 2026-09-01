@@ -70,9 +70,33 @@ function inspectProjectControls(projectPath) {
 }
 
 function isQuietTestInvocation(toolCall, quietTestScript) {
-  const text = JSON.stringify(toolCall || '').toLowerCase();
+  const input = toolCall?.input;
+  const text = (typeof input === 'string' ? input : String(input?.cmd || input?.command || '')).toLowerCase();
   const hasQuietFlags = text.includes('--silent') && /--bail(?:\s+|=)1/.test(text);
   return hasQuietFlags || Boolean(quietTestScript && text.includes(quietTestScript.toLowerCase()));
+}
+
+function isTestCommandInvocation(toolCall) {
+  if (!/(?:exec_command|run_command|\bexec\b)/i.test(String(toolCall?.tool || ''))) return false;
+  const input = toolCall?.input;
+  const command = typeof input === 'string' ? input : String(input?.cmd || input?.command || '');
+  return /(?:^|[;&|]\s*)(?:(?:pnpm|npm|yarn|bun)\b[^\n]*\b(?:test(?::[\w-]+)?|jest|vitest|mocha|ava)\b|(?:jest|vitest|mocha|ava|pytest)\b)/i.test(command);
+}
+
+function isUnboundedFileRead(toolCall) {
+  const name = String(toolCall?.tool || '');
+  if (!/(?:view_file|read_file)/i.test(name)) return false;
+  const input = toolCall?.input;
+  if (typeof input === 'string') return !/\b(?:start_?line|end_?line|fromLine|toLine)\b/i.test(input);
+  if (!input || typeof input !== 'object') return true;
+  const keys = Object.keys(input).map((key) => key.toLowerCase());
+  return !keys.some((key) => ['startline', 'endline', 'start_line', 'end_line', 'fromline', 'toline'].includes(key));
+}
+
+function isLikelyRoutineTurn(turn, hasNoisyTests, hasUnboundedRead) {
+  const prompt = `${turn?.userPrompt || ''} ${turn?.assistantMessage || ''}`;
+  return !hasNoisyTests && !hasUnboundedRead && (turn?.toolCalls?.length || 0) <= 2
+    && /\b(?:docs?|documentation|format(?:ting)?|rename|typo|read|review|status|list)\b/i.test(prompt);
 }
 
 /**
@@ -96,12 +120,13 @@ export function generateTurnIssueReport({ projectPath, session, turn }) {
   const projectControls = inspectProjectControls(projectPath);
 
   // Identify core problem categories
-  const testToolCalls = turn.toolCalls?.filter(tc => JSON.stringify(tc || '').toLowerCase().includes('test')) || [];
+  const testToolCalls = turn.toolCalls?.filter(isTestCommandInvocation) || [];
   const hasNoisyTests = testToolCalls.length > 0 && testToolCalls.some(
     (toolCall) => !isQuietTestInvocation(toolCall, projectControls.quietTestScript)
   );
-  const hasFileSpike = fresh > 25000;
+  const hasUnboundedRead = turn.toolCalls?.some(isUnboundedFileRead) || false;
   const hasHighThinking = think > 1200;
+  const hasRoutineHighThinking = hasHighThinking && isLikelyRoutineTurn(turn, hasNoisyTests, hasUnboundedRead);
   const hasManyTools = (turn.toolCalls?.length || 0) >= 4;
 
   let problemHeadline = 'Uncached Context Inflation & File Noise';
@@ -136,9 +161,9 @@ export function generateTurnIssueReport({ projectPath, session, turn }) {
       : projectControls.hasTestRunner
         ? 'npm test -- --bail 1 --silent'
         : 'npm run build';
-  } else if (hasFileSpike) {
-    problemHeadline = 'Full-File Reading Instead of Targeted Line Slices';
-    problemDetails = `Loaded entire file contents into prompt context rather than using progressive disclosure with line ranges.`;
+  } else if (hasUnboundedRead) {
+    problemHeadline = 'Unbounded File Read Request';
+    problemDetails = `Requested a file read without line-range metadata. The telemetry cannot prove the file size, so this work order targets the missing bound rather than claiming a full-file read.`;
     projectedSavingsTokens = Math.round(fresh * 0.9);
     recommendedAction = projectControls.hasProgressiveDisclosureRule
       ? 'Apply the existing progressive-disclosure rule during the next investigation'
@@ -148,6 +173,15 @@ export function generateTurnIssueReport({ projectPath, session, turn }) {
     resolutionRules = projectControls.hasProgressiveDisclosureRule
       ? `- The project already requires progressive disclosure. Apply that existing rule by searching for the target symbol before reading a narrow line range.\n- Do not duplicate the rule in \`AGENTS.md\`; record the observed workflow correction in the handoff instead.`
       : `- Practice progressive disclosure: always inspect targeted line ranges (\`StartLine\`/\`EndLine\`) rather than reading entire files into prompt context.\n- Never read files over 200 lines in full when making localized edits.`;
+  } else if (hasRoutineHighThinking) {
+    problemHeadline = 'High Reasoning on a Likely Routine Task';
+    problemDetails = `Turn #${turnNum} used ${think.toLocaleString()} reasoning tokens while its request and tool footprint match a likely routine task. Confirm that the work is not complex before lowering reasoning effort.`;
+    projectedSavingsTokens = Math.round(think * 0.88);
+    recommendedAction = 'Use low reasoning effort for this routine task; retain higher effort for complex debugging or design.';
+    badExample = 'Running a documentation, status, or formatting task with high reasoning effort by default.';
+    goodExample = 'Use low reasoning effort for routine work; raise it only when the task requires non-trivial investigation or design.';
+    resolutionRules = `- Use \`reasoning_effort: low\` for this kind of routine task after confirming it does not need deeper investigation.\n- Do not lower reasoning effort for complex debugging, ambiguous incidents, or architecture decisions.`;
+    targetFiles = '[AGENTS.md](AGENTS.md)';
   } else if (hasManyTools) {
     problemHeadline = 'Dense Multi-Step Tool Execution Carryover';
     problemDetails = `Executed ${turn.toolCalls.length} distinct tool calls in a single conversational turn, inflating turn payload.`;
@@ -155,7 +189,7 @@ export function generateTurnIssueReport({ projectPath, session, turn }) {
     recommendedAction = 'Package multi-step verification into a reusable project skill in .agents/skills/';
     badExample = 'Prompting multi-phase architectural chores across sequential tool calls in a single unbounded turn.';
     goodExample = 'Packaging the verification sequence into a modular `.agents/skills/verify-slice/SKILL.md` skill.';
-    resolutionRules = `- Package repetitive multi-turn test/lint workflows into modular \`.agents/skills/\` with \`allow_implicit_invocation: false\`.`;
+    resolutionRules = `- Package repetitive multi-turn test/lint workflows into modular \`.agents/skills/\`.\n- Allow automatic invocation only for narrow, broadly safe skills with a clear trigger; keep broad or specialized skills explicit-only.`;
     targetFiles = 'the relevant workflow under [.agents/skills/](.agents/skills/)';
   }
 
