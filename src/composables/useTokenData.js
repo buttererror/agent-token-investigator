@@ -37,12 +37,11 @@ export function useTokenData() {
   const isAutoRefresh = ref(true);
 
   const filteredSessions = computed(() => {
-    let list = sessions.value;
+    let list = sessions.value || [];
     
-    // Strict 2-way filter by active agent
-    if (activeAgent.value) {
-      list = list.filter(s => (s.agentType || 'codex') === activeAgent.value);
-    }
+    // Strict 2-way filter by active agent with safe fallback
+    const currentAgent = activeAgent.value === 'antigravity' ? 'antigravity' : 'codex';
+    list = list.filter(s => (s.agentType || 'codex') === currentAgent);
     
     if (!activeWorkspace.value || activeWorkspace.value === 'all') {
       return list;
@@ -55,20 +54,27 @@ export function useTokenData() {
   });
 
   const filteredOverview = computed(() => {
-    const list = filteredSessions.value;
+    const list = filteredSessions.value || [];
     if (!list.length) {
       return {
         totalTokens: 0,
         totalSessions: 0,
+        totalInput: 0,
+        totalCached: 0,
+        totalOutput: 0,
+        totalReasoning: 0,
+        cacheHitRate: 0,
         averageCacheHitRate: 0,
         totalReasoningTokens: 0,
-        estimatedCostSaved: 0
+        estimatedCostSaved: 0,
+        estimatedSavingsDollars: '0.00'
       };
     }
 
     let totalTokens = 0;
     let totalInput = 0;
     let totalCached = 0;
+    let totalOutput = 0;
     let totalReasoning = 0;
 
     for (const s of list) {
@@ -76,6 +82,7 @@ export function useTokenData() {
       totalTokens += (usage.total_tokens || 0);
       totalInput += (usage.input_tokens || 0);
       totalCached += (usage.cached_input_tokens || 0);
+      totalOutput += (usage.output_tokens || 0);
       totalReasoning += (usage.reasoning_output_tokens || 0);
     }
 
@@ -85,9 +92,15 @@ export function useTokenData() {
     return {
       totalTokens,
       totalSessions: list.length,
+      totalInput,
+      totalCached,
+      totalOutput,
+      totalReasoning,
+      cacheHitRate: rate,
       averageCacheHitRate: rate,
       totalReasoningTokens: totalReasoning,
-      estimatedCostSaved: parseFloat(saved.toFixed(2))
+      estimatedCostSaved: parseFloat(saved.toFixed(2)),
+      estimatedSavingsDollars: saved.toFixed(2)
     };
   });
 
