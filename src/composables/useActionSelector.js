@@ -12,6 +12,11 @@ export function useActionSelector() {
 
     try {
       const payload = customPayload || action.payload || {};
+      const what = action.title || action.description || 'Applied guidance recommendation';
+      const why = action.whatItAchieves || action.description || 'Optimized token efficiency based on guidance baseline';
+      const how = action.whatItDoes || `Configured ${action.targetFile || 'guidance'}`;
+      const author = 'Guided Optimizer (Recommendation Engine)';
+
       let res;
 
       if (payload.ruleText || action.targetFile === 'AGENTS.md' || action.systemId === 1 || action.systemId === 6) {
@@ -21,7 +26,11 @@ export function useActionSelector() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             targetProjectPath,
-            ruleText: payload.ruleText
+            ruleText: payload.ruleText,
+            what,
+            why,
+            how,
+            author
           })
         });
       } else if (payload.scriptName || action.targetFile === 'package.json' || action.systemId === 2) {
@@ -32,7 +41,11 @@ export function useActionSelector() {
           body: JSON.stringify({
             targetProjectPath,
             scriptName: payload.scriptName,
-            scriptCommand: payload.scriptCommand
+            scriptCommand: payload.scriptCommand,
+            what,
+            why,
+            how,
+            author
           })
         });
       } else if (payload.skillName || action.systemId === 3) {
@@ -44,7 +57,11 @@ export function useActionSelector() {
             targetProjectPath,
             skillName: payload.skillName,
             trigger: payload.trigger,
-            instructions: payload.instructions
+            instructions: payload.instructions,
+            what,
+            why,
+            how,
+            author
           })
         });
       } else {

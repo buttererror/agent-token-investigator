@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { logGuidanceChange } from './guidanceLogger.js';
 
 const BACKUP_DIR = '/home/ellol/apps/agent-token-tracker/.backups';
 
@@ -22,7 +23,7 @@ function createBackup(filePath) {
 /**
  * Action 1: Apply rule to AGENTS.md
  */
-export function applyAgentsRule(targetProjectPath, ruleText) {
+export function applyAgentsRule(targetProjectPath, ruleText, options = {}) {
   const agentsPath = path.join(targetProjectPath, 'AGENTS.md');
   const backup = createBackup(agentsPath);
 
@@ -34,11 +35,24 @@ export function applyAgentsRule(targetProjectPath, ruleText) {
     fs.writeFileSync(agentsPath, content, 'utf8');
   }
 
+  const record = logGuidanceChange({
+    projectPath: targetProjectPath,
+    actionType: 'APPLY_AGENTS_RULE',
+    what: options.what || 'Injected token optimization rule into AGENTS.md',
+    why: options.why || 'Enforce durable token-saving conventions across agent sessions',
+    how: options.how || `Appended rule to ${agentsPath}:\n${ruleText.trim()}`,
+    targetFile: agentsPath,
+    author: options.author || 'Guided Optimizer (Guidance Engine)',
+    backupId: backup?.backupId || null,
+    diff: `+ ${ruleText.trim()}`
+  });
+
   return {
     success: true,
     action: 'APPLY_AGENTS_RULE',
     targetFile: agentsPath,
     backup,
+    guidanceRecord: record,
     message: `Successfully injected rule into ${agentsPath}`
   };
 }
@@ -46,7 +60,7 @@ export function applyAgentsRule(targetProjectPath, ruleText) {
 /**
  * Action 2: Apply script to package.json
  */
-export function applyPackageScript(targetProjectPath, scriptName, scriptCommand) {
+export function applyPackageScript(targetProjectPath, scriptName, scriptCommand, options = {}) {
   const pkgPath = path.join(targetProjectPath, 'package.json');
   if (!fs.existsSync(pkgPath)) {
     throw new Error(`package.json not found at ${pkgPath}`);
@@ -60,11 +74,24 @@ export function applyPackageScript(targetProjectPath, scriptName, scriptCommand)
 
   fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf8');
 
+  const record = logGuidanceChange({
+    projectPath: targetProjectPath,
+    actionType: 'APPLY_PACKAGE_SCRIPT',
+    what: options.what || `Added lean script "${scriptName}" to package.json`,
+    why: options.why || 'Prevent full test suite console logs and noise from polluting prompt context',
+    how: options.how || `Added script "${scriptName}": "${scriptCommand}" in ${pkgPath}`,
+    targetFile: pkgPath,
+    author: options.author || 'Guided Optimizer (Testing & Verification Agent)',
+    backupId: backup?.backupId || null,
+    diff: `+ "${scriptName}": "${scriptCommand}"`
+  });
+
   return {
     success: true,
     action: 'APPLY_PACKAGE_SCRIPT',
     targetFile: pkgPath,
     backup,
+    guidanceRecord: record,
     message: `Added script "${scriptName}": "${scriptCommand}" to ${pkgPath}`
   };
 }
@@ -72,7 +99,7 @@ export function applyPackageScript(targetProjectPath, scriptName, scriptCommand)
 /**
  * Action 3: Create project skill in .agents/skills/
  */
-export function createProjectSkill(targetProjectPath, skillName = 'verify-slice', trigger = '$verify-slice', instructions = '') {
+export function createProjectSkill(targetProjectPath, skillName = 'verify-slice', trigger = '$verify-slice', instructions = '', options = {}) {
   if (!skillName) {
     throw new Error('Skill name is required');
   }
@@ -112,12 +139,25 @@ ${instructions || '# Run checks with minimal noise'}
   fs.writeFileSync(skillFile, skillContent, 'utf8');
   fs.writeFileSync(agentConfigFile, yamlContent, 'utf8');
 
+  const record = logGuidanceChange({
+    projectPath: targetProjectPath,
+    actionType: 'CREATE_PROJECT_SKILL',
+    what: options.what || `Created progressive disclosure skill "${sanitizedSkillName}"`,
+    why: options.why || 'Encapsulate repetitive multi-step verification into a single bounded trigger to keep context lean',
+    how: options.how || `Generated ${skillFile} with trigger ${trigger || ('$' + sanitizedSkillName)}`,
+    targetFile: skillFile,
+    author: options.author || 'Guided Optimizer (Skill Architect)',
+    backupId: backup?.backupId || null,
+    diff: `+ ${skillFile}\n+ ${agentConfigFile}`
+  });
+
   return {
     success: true,
     action: 'CREATE_PROJECT_SKILL',
     targetDir: skillDir,
     targetFile: skillFile,
     backup,
+    guidanceRecord: record,
     message: `Created skill "${sanitizedSkillName}" in ${skillFile}`
   };
 }

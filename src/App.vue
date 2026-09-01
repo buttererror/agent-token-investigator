@@ -1,6 +1,7 @@
 <script setup>
 import { ref } from 'vue';
 import { useTokenData } from './composables/useTokenData.js';
+import { useActionSelector } from './composables/useActionSelector.js';
 import HeaderNav from './components/HeaderNav.vue';
 import RateLimitMeter from './components/RateLimitMeter.vue';
 import MetricsOverview from './components/MetricsOverview.vue';
@@ -13,25 +14,35 @@ import ActionPromptLinterModal from './components/ActionPromptLinterModal.vue';
 import ActionHandoffModal from './components/ActionHandoffModal.vue';
 import ActionSkillGeneratorModal from './components/ActionSkillGeneratorModal.vue';
 import BenchmarkModal from './components/BenchmarkModal.vue';
+import GuidanceRecordsModal from './components/GuidanceRecordsModal.vue';
 
 const {
   overview,
   sessions,
   pacingForecast,
   glossary,
+  projects,
+  guidanceRecords,
   isLoading,
+  isRecordsLoading,
   error,
   selectedSession,
   activeWorkspace,
   isAutoRefresh,
+  setWorkspace,
+  fetchGuidanceRecords,
+  addGuidanceRecord,
   refresh
 } = useTokenData();
+
+const { undoLastAction } = useActionSelector();
 
 const isGuideOpen = ref(false);
 const isLinterOpen = ref(false);
 const isHandoffOpen = ref(false);
 const isSkillGenOpen = ref(false);
 const isBenchmarkOpen = ref(false);
+const isGuidanceRecordsOpen = ref(false);
 const activeInspectSession = ref(null);
 
 function handleInspect(session) {
@@ -47,18 +58,35 @@ function handleExportHandoff(session) {
 function toggleRefresh() {
   isAutoRefresh.value = !isAutoRefresh.value;
 }
+
+function handleWorkspaceChange(newPath) {
+  setWorkspace(newPath);
+}
+
+async function handleRollback(backupId) {
+  await undoLastAction(backupId);
+  await fetchGuidanceRecords(activeWorkspace.value);
+}
+
+async function handleAddGuidanceRecord(data) {
+  await addGuidanceRecord(data);
+}
 </script>
 
 <template>
   <div class="app-container">
-    <!-- Header Navigation -->
+    <!-- Header Navigation with Project Selector & Guidance Log -->
     <HeaderNav 
       :active-workspace="activeWorkspace"
+      :projects="projects"
+      :records-count="guidanceRecords.length"
       :is-auto-refresh="isAutoRefresh"
       @toggle-refresh="toggleRefresh"
       @open-guide="isGuideOpen = true"
       @open-linter="isLinterOpen = true"
       @open-benchmark="isBenchmarkOpen = true"
+      @open-guidance-records="isGuidanceRecordsOpen = true"
+      @change-workspace="handleWorkspaceChange"
     />
 
     <!-- Main Content -->
@@ -98,6 +126,18 @@ function toggleRefresh() {
     </div>
 
     <!-- Modals & Drawers -->
+    <GuidanceRecordsModal 
+      :is-open="isGuidanceRecordsOpen"
+      :active-workspace="activeWorkspace"
+      :projects="projects"
+      :records="guidanceRecords"
+      :is-loading="isRecordsLoading"
+      @close="isGuidanceRecordsOpen = false"
+      @select-project="fetchGuidanceRecords"
+      @add-record="handleAddGuidanceRecord"
+      @rollback="handleRollback"
+    />
+
     <GuideDrawer 
       :is-open="isGuideOpen"
       :glossary="glossary"

@@ -8,6 +8,7 @@ import { applyAgentsRule, applyPackageScript, createProjectSkill, undoAction } f
 import { compileSessionHandoff } from './handoffCompiler.js';
 import { lintPrompt } from './promptLinterEngine.js';
 import { runVerificationBenchmark } from './benchmarkEngine.js';
+import { logGuidanceChange, getGuidanceRecordsForProject, getTrackedProjects } from './guidanceLogger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -128,8 +129,8 @@ app.get('/api/run-benchmark', (req, res) => {
 // 9. Action 1: Apply rule to AGENTS.md
 app.post('/api/apply-agents-rule', (req, res) => {
   try {
-    const { targetProjectPath = '/home/ellol/solutions/clinic-platform', ruleText } = req.body;
-    const result = applyAgentsRule(targetProjectPath, ruleText);
+    const { targetProjectPath = '/home/ellol/solutions/clinic-platform', ruleText, what, why, how, author } = req.body;
+    const result = applyAgentsRule(targetProjectPath, ruleText, { what, why, how, author });
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -139,8 +140,8 @@ app.post('/api/apply-agents-rule', (req, res) => {
 // 9. Action 2: Apply script to package.json
 app.post('/api/apply-package-script', (req, res) => {
   try {
-    const { targetProjectPath = '/home/ellol/solutions/clinic-platform', scriptName, scriptCommand } = req.body;
-    const result = applyPackageScript(targetProjectPath, scriptName, scriptCommand);
+    const { targetProjectPath = '/home/ellol/solutions/clinic-platform', scriptName, scriptCommand, what, why, how, author } = req.body;
+    const result = applyPackageScript(targetProjectPath, scriptName, scriptCommand, { what, why, how, author });
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -150,15 +151,58 @@ app.post('/api/apply-package-script', (req, res) => {
 // 10. Action 3: Create project skill
 app.post('/api/create-skill', (req, res) => {
   try {
-    const { targetProjectPath = '/home/ellol/solutions/clinic-platform', skillName, trigger, instructions } = req.body;
-    const result = createProjectSkill(targetProjectPath, skillName, trigger, instructions);
+    const { targetProjectPath = '/home/ellol/solutions/clinic-platform', skillName, trigger, instructions, what, why, how, author } = req.body;
+    const result = createProjectSkill(targetProjectPath, skillName, trigger, instructions, { what, why, how, author });
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// 11. Undo / Rollback
+// 11. Guidance Changelog & Records API
+app.get('/api/guidance-records', (req, res) => {
+  try {
+    const { projectPath = 'all' } = req.query;
+    const records = getGuidanceRecordsForProject(projectPath);
+    res.json(records);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/guidance-records', (req, res) => {
+  try {
+    const { projectPath, actionType = 'MANUAL_GUIDANCE_EDIT', what, why, how, targetFile, author, diff } = req.body;
+    if (!what || !why || !how) {
+      return res.status(400).json({ error: 'what, why, and how are required fields for guidance records' });
+    }
+    const record = logGuidanceChange({
+      projectPath,
+      actionType,
+      what,
+      why,
+      how,
+      targetFile,
+      author,
+      diff
+    });
+    res.json(record);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 12. Tracked Projects Selector API
+app.get('/api/projects', async (req, res) => {
+  try {
+    const projects = await getTrackedProjects();
+    res.json(projects);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 13. Undo / Rollback
 app.post('/api/undo-action', (req, res) => {
   try {
     const { backupId } = req.body;

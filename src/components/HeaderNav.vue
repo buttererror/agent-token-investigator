@@ -1,10 +1,18 @@
 <script setup>
 import Tooltip from './common/Tooltip.vue';
 
-defineProps({
+const props = defineProps({
   activeWorkspace: {
     type: String,
     required: true
+  },
+  projects: {
+    type: Array,
+    default: () => []
+  },
+  recordsCount: {
+    type: Number,
+    default: 0
   },
   isAutoRefresh: {
     type: Boolean,
@@ -12,7 +20,18 @@ defineProps({
   }
 });
 
-defineEmits(['toggle-refresh', 'open-guide', 'open-linter']);
+const emit = defineEmits([
+  'toggle-refresh',
+  'open-guide',
+  'open-linter',
+  'open-benchmark',
+  'open-guidance-records',
+  'change-workspace'
+]);
+
+function onSelectProject(e) {
+  emit('change-workspace', e.target.value);
+}
 </script>
 
 <template>
@@ -25,17 +44,42 @@ defineEmits(['toggle-refresh', 'open-guide', 'open-linter']);
           <span class="brand-sub">Codex Optimization Advisor</span>
         </div>
       </div>
+
+      <!-- Project Selector Pill -->
       <div class="workspace-pill">
-        <span class="pill-label">Workspace:</span>
-        <span class="pill-path mono">{{ activeWorkspace }}</span>
+        <span class="pill-label">Project:</span>
+        <select 
+          :value="activeWorkspace" 
+          class="project-select-inline mono"
+          @change="onSelectProject"
+        >
+          <option 
+            v-for="p in projects" 
+            :key="p.path" 
+            :value="p.path"
+          >
+            {{ p.name }} ({{ p.path }})
+          </option>
+          <option v-if="!projects.some(p => p.path === activeWorkspace)" :value="activeWorkspace">
+            {{ activeWorkspace }}
+          </option>
+        </select>
         <Tooltip 
-          title="Active Monorepo" 
-          text="Actions applied (such as AGENTS.md rules or package.json scripts) will be safely written to this target repository." 
+          title="Tracked Project Scope" 
+          text="Switch between active workspaces. Recommendations, guidance records, and skills are scoped to the selected project." 
         />
       </div>
     </div>
 
     <div class="header-right">
+      <button 
+        class="btn btn-secondary btn-sm"
+        @click="$emit('open-guidance-records')"
+      >
+        <span>📜</span> Guidance Log
+        <span v-if="recordsCount > 0" class="mini-count-badge">{{ recordsCount }}</span>
+      </button>
+
       <button 
         class="btn btn-secondary btn-sm"
         @click="$emit('open-benchmark')"
@@ -121,7 +165,7 @@ defineEmits(['toggle-refresh', 'open-guide', 'open-linter']);
   align-items: center;
   background-color: var(--bg-input);
   border: 1px solid var(--border-color);
-  padding: 6px 14px;
+  padding: 4px 12px;
   border-radius: 9999px;
   font-size: 0.8rem;
 }
@@ -131,9 +175,30 @@ defineEmits(['toggle-refresh', 'open-guide', 'open-linter']);
   margin-right: 6px;
 }
 
-.pill-path {
+.project-select-inline {
+  background: transparent;
+  border: none;
   color: var(--accent-blue);
-  font-weight: 500;
+  font-size: 0.82rem;
+  font-weight: 600;
+  outline: none;
+  cursor: pointer;
+  max-width: 280px;
+}
+
+.project-select-inline option {
+  background: var(--bg-card);
+  color: var(--text-main);
+}
+
+.mini-count-badge {
+  background: var(--accent-blue);
+  color: #0b0f19;
+  font-size: 0.7rem;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  margin-left: 4px;
 }
 
 .header-right {
