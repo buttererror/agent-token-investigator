@@ -9,9 +9,14 @@ This document establishes the project contract, role-specific agent guidance, re
 - **Application**: Agent Token Tracker — real-time token telemetry, rate-limit pacing, and optimization dashboard for AI agent sessions.
 - **Stack**: Vue 3 (Composition API), Express backend, Vite, Node.js.
 - **Key Directories**:
-  - [`server/`](server/): Backend API, session parser (`parser.js`), diagnostic engine (`analyzer.js`), action applier (`actionApplier.js`), and benchmark runner (`benchmarkEngine.js`).
+  - [`server/`](server/): Backend API, session parser (`parser.js`, `antigravityParser.js`), diagnostic engine (`analyzer.js`), action applier (`actionApplier.js`), and benchmark runner (`benchmarkEngine.js`).
   - [`src/`](src/): Vue 3 frontend components, analytics charts, and composables (`useTokenData.js`, `useActionSelector.js`, `usePromptLinter.js`).
   - [`dist/`](dist/): Production frontend build artifacts served by Express.
+  - [`docs/architecture/`](docs/architecture/): Modular reference documentation and mental models:
+    - [🧠 Mental Model & Token Economics](docs/architecture/mental-model.md)
+    - [🤖 Multi-Agent Architecture & Ingestion](docs/architecture/multi-agent-system.md)
+    - [📁 Project Discovery & Data Privacy](docs/architecture/project-discovery-and-privacy.md)
+    - [⚡ Optimization Actions & Diagnostics](docs/architecture/optimization-actions-and-diagnostics.md)
 
 ---
 

@@ -101,3 +101,14 @@ While Codex session logs are parsed out of the box, the system is designed aroun
 | **Antigravity / Gemini CLI** | `~/.gemini/antigravity/brain/*/transcript.jsonl` | Step trajectories & tool calls |
 | **Claude Code** | `~/.claude/projects/*/logs/*.jsonl` | Interaction JSONL |
 | **In-Project Telemetry** | `<project>/.agents/logs/*.jsonl` | Universal OpenInference / JSON |
+
+---
+
+## 📚 Architecture & Reference Documentation
+
+Detailed architectural deep dives and operational reference documents are organized in [`docs/architecture/`](docs/architecture/):
+
+- **[🧠 Mental Model & Token Economics](docs/architecture/mental-model.md)**: Details the quadratic context accumulation trap, prompt cache physics, reasoning effort trade-offs, and progressive disclosure principles.
+- **[🤖 Multi-Agent Architecture & Ingestion](docs/architecture/multi-agent-system.md)**: Explains the normalized session schema, parser adapter pattern, and real-time agent switcher (`All`, `Codex`, `Antigravity`).
+- **[📁 Project Discovery & Data Privacy](docs/architecture/project-discovery-and-privacy.md)**: Covers the 3-layer discovery pipeline, local directory browsing, dynamic path resolution, and zero-egress data privacy safeguards.
+- **[⚡ Optimization Actions & Diagnostics](docs/architecture/optimization-actions-and-diagnostics.md)**: Documents the 7 high-leverage optimization actions, turn efficiency diagnosis, and batch post-mortem generation (`docs/tokens-consumptions/issues/`).
