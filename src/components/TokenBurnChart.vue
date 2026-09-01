@@ -18,6 +18,10 @@ const props = defineProps({
   activeWorkspace: {
     type: String,
     default: 'all'
+  },
+  timeFilter: {
+    type: String,
+    default: 'all'
   }
 });
 
@@ -25,7 +29,7 @@ const isAntigravity = computed(() => props.activeAgent === 'antigravity');
 
 const scopeLabel = computed(() => {
   const agentLabel = isAntigravity.value ? 'Antigravity' : 'Codex';
-  const count = props.sessions.length;
+  const count = scopedSessions.value.length;
   if (!props.activeWorkspace || props.activeWorkspace === 'all') {
     return `${agentLabel} • All Projects (${count} session${count === 1 ? '' : 's'})`;
   }
@@ -38,11 +42,38 @@ const scopeLabel = computed(() => {
 // 2. Fresh Input: props.overview.totalInput - props.overview.totalCached
 // 3. Reasoning Output: props.overview.totalReasoning
 // 4. Standard Output Text: Math.max(props.overview.totalOutput - props.overview.totalReasoning, 0)
-const total = computed(() => props.overview?.totalTokens || 1);
-const cachedTokens = computed(() => props.overview?.totalCached || 0);
-const freshTokens = computed(() => Math.max((props.overview?.totalInput || 0) - cachedTokens.value, 0));
-const reasoningTokens = computed(() => props.overview?.totalReasoning || 0);
-const standardOutputTokens = computed(() => Math.max((props.overview?.totalOutput || 0) - reasoningTokens.value, 0));
+const scopedSessions = computed(() => {
+  if (props.timeFilter === 'all' || !props.sessions.length) return props.sessions;
+  const now = Date.now();
+  const today = new Date().toISOString().split('T')[0];
+  return props.sessions.filter(session => {
+    const rawTs = session.updatedAt || session.meta?.timestamp || session.turns?.[0]?.startedAt;
+    const timestamp = rawTs ? new Date(rawTs).getTime() : NaN;
+    if (!Number.isFinite(timestamp)) return false;
+    if (props.timeFilter === 'today') return new Date(timestamp).toISOString().split('T')[0] === today;
+    const windows = { '24h': 1, '7d': 7, '30d': 30 };
+    return windows[props.timeFilter] ? now - timestamp <= windows[props.timeFilter] * 24 * 60 * 60 * 1000 : true;
+  });
+});
+
+const scopedOverview = computed(() => {
+  if (props.timeFilter === 'all') return props.overview || {};
+  return scopedSessions.value.reduce((summary, session) => {
+    const usage = session.totalUsage || {};
+    summary.totalTokens += usage.total_tokens || 0;
+    summary.totalInput += usage.input_tokens || 0;
+    summary.totalCached += usage.cached_input_tokens || 0;
+    summary.totalOutput += usage.output_tokens || 0;
+    summary.totalReasoning += usage.reasoning_output_tokens || 0;
+    return summary;
+  }, { totalTokens: 0, totalInput: 0, totalCached: 0, totalOutput: 0, totalReasoning: 0 });
+});
+
+const total = computed(() => scopedOverview.value.totalTokens || 1);
+const cachedTokens = computed(() => scopedOverview.value.totalCached || 0);
+const freshTokens = computed(() => Math.max((scopedOverview.value.totalInput || 0) - cachedTokens.value, 0));
+const reasoningTokens = computed(() => scopedOverview.value.totalReasoning || 0);
+const standardOutputTokens = computed(() => Math.max((scopedOverview.value.totalOutput || 0) - reasoningTokens.value, 0));
 
 // Exact percentage formatters (showing decimals for precision)
 function formatPct(val) {
@@ -60,14 +91,14 @@ const outputPctNum = computed(() => (standardOutputTokens.value / total.value) *
 
 // Reasoning ratio against total generated output
 const reasoningShareOfOutput = computed(() => {
-  const totalOut = props.overview?.totalOutput || 1;
+  const totalOut = scopedOverview.value.totalOutput || 1;
   return Math.round((reasoningTokens.value / totalOut) * 100);
 });
 
 // Group sessions by day for timeline chart
 const dailyUsage = computed(() => {
   const map = new Map();
-  props.sessions.forEach(s => {
+  scopedSessions.value.forEach(s => {
     const date = s.updatedAt ? s.updatedAt.split('T')[0] : 'Recent';
     const current = map.get(date) || { date, tokens: 0, count: 0 };
     current.tokens += s.totalUsage?.total_tokens || 0;
@@ -166,7 +197,7 @@ const dailyUsage = computed(() => {
 
       <!-- Quick Reasoning Share Callout -->
       <div class="reasoning-share-bar" :class="{ 'reasoning-share-antigravity': isAntigravity }">
-        <span>🧠 <strong>Reasoning Effort Share:</strong> Reasoning accounts for <strong>{{ reasoningShareOfOutput }}%</strong> of all generated model output ({{ reasoningTokens.toLocaleString() }} of {{ (overview?.totalOutput || 0).toLocaleString() }} tokens).</span>
+        <span>🧠 <strong>Reasoning Effort Share:</strong> Reasoning accounts for <strong>{{ reasoningShareOfOutput }}%</strong> of all generated model output ({{ reasoningTokens.toLocaleString() }} of {{ (scopedOverview?.totalOutput || 0).toLocaleString() }} tokens).</span>
       </div>
 
     </div>
@@ -370,4 +401,3 @@ const dailyUsage = computed(() => {
   border-color: rgba(168, 85, 247, 0.25);
 }
 </style>
-

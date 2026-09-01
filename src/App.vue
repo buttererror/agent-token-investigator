@@ -46,6 +46,7 @@ const {
 
 const { undoLastAction } = useActionSelector();
 
+const activeTimeFilter = ref('all');
 const isGuideOpen = ref(false);
 const isLinterOpen = ref(false);
 const isHandoffOpen = ref(false);
@@ -148,7 +149,12 @@ onMounted(() => {
 
 
       <!-- Overview Metrics Grid -->
-      <MetricsOverview :overview="filteredOverview" :sessions="filteredSessions" />
+      <MetricsOverview
+        :overview="filteredOverview"
+        :sessions="filteredSessions"
+        :time-filter="activeTimeFilter"
+        @update-time-filter="activeTimeFilter = $event"
+      />
 
       <!-- Token Burn Velocity Chart -->
       <TokenBurnChart 
@@ -156,6 +162,7 @@ onMounted(() => {
         :sessions="filteredSessions" 
         :active-agent="activeAgent"
         :active-workspace="activeWorkspace"
+        :time-filter="activeTimeFilter"
       />
 
 

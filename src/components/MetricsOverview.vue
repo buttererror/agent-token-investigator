@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue';
+import { computed } from 'vue';
 import Tooltip from './common/Tooltip.vue';
 
 const props = defineProps({
@@ -10,10 +10,14 @@ const props = defineProps({
   sessions: {
     type: Array,
     default: () => []
+  },
+  timeFilter: {
+    type: String,
+    default: 'all'
   }
 });
 
-const selectedTimeFilter = ref('all');
+const emit = defineEmits(['update-time-filter']);
 
 const timeFilterOptions = [
   { id: 'all', label: 'All Time' },
@@ -24,7 +28,7 @@ const timeFilterOptions = [
 ];
 
 const filteredMetrics = computed(() => {
-  if (selectedTimeFilter.value === 'all' || !props.sessions || props.sessions.length === 0) {
+  if (props.timeFilter === 'all' || !props.sessions || props.sessions.length === 0) {
     return {
       totalTokens: props.overview?.totalTokens || 0,
       totalSessions: props.overview?.totalSessions || props.sessions?.length || 0,
@@ -46,17 +50,17 @@ const filteredMetrics = computed(() => {
     const sessionTime = new Date(rawTs).getTime();
     if (isNaN(sessionTime)) return false;
 
-    if (selectedTimeFilter.value === 'today') {
+    if (props.timeFilter === 'today') {
       const sessionDateStr = new Date(sessionTime).toISOString().split('T')[0];
       return sessionDateStr === todayDateStr;
     }
-    if (selectedTimeFilter.value === '24h') {
+    if (props.timeFilter === '24h') {
       return now - sessionTime <= 24 * 60 * 60 * 1000;
     }
-    if (selectedTimeFilter.value === '7d') {
+    if (props.timeFilter === '7d') {
       return now - sessionTime <= 7 * 24 * 60 * 60 * 1000;
     }
-    if (selectedTimeFilter.value === '30d') {
+    if (props.timeFilter === '30d') {
       return now - sessionTime <= 30 * 24 * 60 * 60 * 1000;
     }
     return true;
@@ -115,8 +119,8 @@ const cacheEfficiencyBadge = computed(() => {
         <button
           v-for="opt in timeFilterOptions"
           :key="opt.id"
-          :class="['filter-pill-btn', { active: selectedTimeFilter === opt.id }]"
-          @click="selectedTimeFilter = opt.id"
+          :class="['filter-pill-btn', { active: timeFilter === opt.id }]"
+          @click="emit('update-time-filter', opt.id)"
         >
           {{ opt.label }}
         </button>
