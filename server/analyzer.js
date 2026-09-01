@@ -53,7 +53,7 @@ export function checkActionStatus(targetProjectPath, action) {
  * Analyzer & Guided What-If Optimization Engine with Date & Scope Filters
  */
 export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, targetProjectPath = null) {
-  const { scope = 'all', date = null, sessionId = null } = filterOptions;
+  const { scope = 'all', date = null, startHour = null, sessionId = null } = filterOptions;
 
   let targetSessions = [...sessions];
   let scopeLabel = 'All Recorded History';
@@ -65,15 +65,35 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
     targetSessions = sessions.filter(s => (s.updatedAt || s.meta?.timestamp || '').startsWith(date));
     scopeLabel = `Specific Date (${date})`;
   } else if (scope === '5hour') {
-    const baseTime = date 
-      ? new Date(date + 'T23:59:59Z').getTime() 
-      : (sessions[0]?.updatedAt ? new Date(sessions[0].updatedAt).getTime() : Date.now());
-    const fiveHoursAgo = baseTime - (5 * 60 * 60 * 1000);
-    targetSessions = sessions.filter(s => {
-      const sTime = new Date(s.updatedAt || s.meta?.timestamp || 0).getTime();
-      return sTime >= fiveHoursAgo && sTime <= baseTime;
-    });
-    scopeLabel = date ? `5-Hour Window on ${date}` : `Latest 5-Hour Rate-Limit Window`;
+    const selectedDate = date || new Date().toISOString().split('T')[0];
+    
+    if (startHour !== undefined && startHour !== null && startHour !== 'latest' && startHour !== '') {
+      const h = parseInt(startHour, 10);
+      const safeH = isNaN(h) ? 0 : Math.max(0, Math.min(19, h));
+      const endH = safeH + 5;
+      
+      const startStr = `${selectedDate}T${String(safeH).padStart(2, '0')}:00:00`;
+      const endStr = `${selectedDate}T${String(endH).padStart(2, '0')}:00:00`;
+      
+      const startTime = new Date(startStr).getTime();
+      const endTime = new Date(endStr).getTime();
+      
+      targetSessions = sessions.filter(s => {
+        const sTime = new Date(s.updatedAt || s.meta?.timestamp || 0).getTime();
+        return sTime >= startTime && sTime <= endTime;
+      });
+      scopeLabel = `5-Hour Window: ${selectedDate} (${String(safeH).padStart(2, '0')}:00 – ${String(endH).padStart(2, '0')}:00)`;
+    } else {
+      const baseTime = date 
+        ? new Date(date + 'T23:59:59').getTime() 
+        : (sessions[0]?.updatedAt ? new Date(sessions[0].updatedAt).getTime() : Date.now());
+      const fiveHoursAgo = baseTime - (5 * 60 * 60 * 1000);
+      targetSessions = sessions.filter(s => {
+        const sTime = new Date(s.updatedAt || s.meta?.timestamp || 0).getTime();
+        return sTime >= fiveHoursAgo && sTime <= baseTime;
+      });
+      scopeLabel = date ? `Latest 5-Hour Window on ${date}` : `Latest 5-Hour Rate-Limit Window`;
+    }
   } else if (scope === 'weekly') {
     const baseTime = date 
       ? new Date(date + 'T23:59:59Z').getTime() 

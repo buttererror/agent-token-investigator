@@ -21,6 +21,7 @@ const { isApplying, feedbackMessage, feedbackType, appliedBackups, applyAction, 
 const activeDiagnosticIndex = ref(0);
 const activeScopeMode = ref('all');
 const filterDate = ref(new Date().toISOString().split('T')[0]);
+const filter5HourStart = ref('latest'); // 'latest' or '0'..'19'
 const filterSessionId = ref('');
 const isDiagLoading = ref(false);
 
@@ -45,7 +46,12 @@ const customSkillName = ref('verify-slice');
 const customSkillTrigger = ref('$verify-slice');
 const customSkillInstructions = ref('');
 
-async function fetchLocalDiagnostics(scope = activeScopeMode.value, date = filterDate.value, sessionId = filterSessionId.value) {
+async function fetchLocalDiagnostics(
+  scope = activeScopeMode.value, 
+  date = filterDate.value, 
+  startHour = filter5HourStart.value, 
+  sessionId = filterSessionId.value
+) {
   isDiagLoading.value = true;
   try {
     const params = new URLSearchParams({
@@ -54,6 +60,9 @@ async function fetchLocalDiagnostics(scope = activeScopeMode.value, date = filte
     });
     if (date && (scope === 'date' || scope === '5hour' || scope === 'weekly')) {
       params.set('date', date);
+    }
+    if (scope === '5hour' && startHour) {
+      params.set('startHour', startHour);
     }
     if (sessionId && scope === 'session') {
       params.set('sessionId', sessionId);
@@ -75,21 +84,21 @@ async function fetchLocalDiagnostics(scope = activeScopeMode.value, date = filte
 function changeScopeMode(mode) {
   activeScopeMode.value = mode;
   activeDiagnosticIndex.value = 0;
-  fetchLocalDiagnostics(mode, filterDate.value, filterSessionId.value);
+  fetchLocalDiagnostics(mode, filterDate.value, filter5HourStart.value, filterSessionId.value);
 }
 
 function onDateChange() {
-  activeScopeMode.value = 'date';
-  activeDiagnosticIndex.value = 0;
-  fetchLocalDiagnostics('date', filterDate.value, '');
+  fetchLocalDiagnostics(activeScopeMode.value, filterDate.value, filter5HourStart.value, filterSessionId.value);
+}
+
+function on5HourStartChange(val) {
+  filter5HourStart.value = String(val);
+  fetchLocalDiagnostics(activeScopeMode.value, filterDate.value, String(val), filterSessionId.value);
 }
 
 function onSessionChange() {
-  if (filterSessionId.value) {
-    activeScopeMode.value = 'session';
-    activeDiagnosticIndex.value = 0;
-    fetchLocalDiagnostics('session', '', filterSessionId.value);
-  }
+  const mode = filterSessionId.value ? 'session' : activeScopeMode.value;
+  fetchLocalDiagnostics(mode, filterDate.value, filter5HourStart.value, filterSessionId.value);
 }
 
 function startEditing(action) {
@@ -220,6 +229,41 @@ onMounted(() => {
             class="date-input mono"
             @change="onDateChange"
           />
+        </div>
+
+        <!-- 5-Hour Window Specific Time Range Selector -->
+        <div v-if="activeScopeMode === '5hour'" class="hour-picker-wrap">
+          <span class="ctrl-label">5h Slice:</span>
+          <select 
+            :value="filter5HourStart" 
+            class="hour-select mono"
+            @change="e => on5HourStartChange(e.target.value)"
+          >
+            <option value="latest">⚡ Latest 5 Hours</option>
+            <option value="0">🌙 00:00 – 05:00 (Night)</option>
+            <option value="5">🌅 05:00 – 10:00 (Early Morning)</option>
+            <option value="8">💼 08:00 – 13:00 (Morning)</option>
+            <option value="10">☀️ 10:00 – 15:00 (Midday)</option>
+            <option value="12">☕ 12:00 – 17:00 (Afternoon)</option>
+            <option value="14">🚀 14:00 – 19:00 (Late Afternoon)</option>
+            <option value="17">🌆 17:00 – 22:00 (Evening)</option>
+            <option value="19">🌌 19:00 – 24:00 (Late Night)</option>
+          </select>
+          
+          <div class="hour-slider-inline">
+            <input 
+              type="range" 
+              min="0" 
+              max="19" 
+              :value="filter5HourStart === 'latest' ? 14 : (parseInt(filter5HourStart, 10) || 0)"
+              @input="e => on5HourStartChange(e.target.value)"
+              class="hour-range-slider"
+              title="Drag to select start hour (0:00 to 19:00)"
+            />
+            <span v-if="filter5HourStart !== 'latest'" class="slider-val-tag mono">
+              {{ String(filter5HourStart).padStart(2, '0') }}:00 – {{ String(parseInt(filter5HourStart, 10) + 5).padStart(2, '0') }}:00
+            </span>
+          </div>
         </div>
 
         <div class="session-picker-wrap" v-if="allSessions.length > 0">
@@ -543,6 +587,58 @@ onMounted(() => {
   padding: 4px 8px;
   font-size: 0.75rem;
   outline: none;
+}
+
+.date-picker-wrap, .session-picker-wrap, .hour-picker-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.hour-picker-wrap {
+  background: rgba(56, 189, 248, 0.05);
+  border-color: rgba(56, 189, 248, 0.3);
+}
+
+.hour-select {
+  background: transparent;
+  border: none;
+  color: var(--text-main);
+  font-size: 0.76rem;
+  outline: none;
+  cursor: pointer;
+}
+
+.hour-select option {
+  background: var(--bg-card);
+  color: var(--text-main);
+}
+
+.hour-slider-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 4px;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  padding-left: 6px;
+}
+
+.hour-range-slider {
+  width: 70px;
+  height: 4px;
+  accent-color: var(--accent-blue);
+  cursor: pointer;
+}
+
+.slider-val-tag {
+  font-size: 0.72rem;
+  color: var(--accent-blue);
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .scope-summary-pill {

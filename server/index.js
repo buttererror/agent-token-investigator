@@ -67,10 +67,10 @@ app.get('/api/sessions/:id', async (req, res) => {
 // 4. Guided diagnostics with What-If simulation and date/scope filtering
 app.get('/api/diagnostics', async (req, res) => {
   try {
-    const { scope = 'all', date, sessionId, targetProjectPath = process.cwd() } = req.query;
+    const { scope = 'all', date, startHour, sessionId, targetProjectPath = process.cwd() } = req.query;
     const sessions = await getAllSessions();
     const overview = await getOverviewMetrics(sessions);
-    const result = runDiagnostics(sessions, overview, { scope, date, sessionId }, targetProjectPath);
+    const result = runDiagnostics(sessions, overview, { scope, date, startHour, sessionId }, targetProjectPath);
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
