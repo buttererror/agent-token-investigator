@@ -7,34 +7,51 @@ const CODEX_DIR = path.join(os.homedir(), '.codex');
 const SESSIONS_DIR = path.join(CODEX_DIR, 'sessions');
 const INDEX_FILE = path.join(CODEX_DIR, 'session_index.jsonl');
 
+// File-level memory cache: filePath -> { mtimeMs, session }
+const fileCache = new Map();
+let lastIndexCache = null;
+let lastIndexMtime = 0;
+
 /**
- * Reads session_index.jsonl to map session_id to thread_name
+ * Reads session_index.jsonl to map session_id to thread_name (cached by mtime)
  */
 export async function getSessionIndex() {
-  const indexMap = new Map();
   if (!fs.existsSync(INDEX_FILE)) {
-    return indexMap;
+    return new Map();
   }
 
-  const fileStream = fs.createReadStream(INDEX_FILE);
-  const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
-
-  for await (const line of rl) {
-    if (!line.trim()) continue;
-    try {
-      const data = JSON.parse(line);
-      if (data.id) {
-        indexMap.set(data.id, {
-          id: data.id,
-          threadName: data.thread_name || 'Untitled Thread',
-          updatedAt: data.updated_at
-        });
-      }
-    } catch (e) {
-      // ignore malformed lines
+  try {
+    const stat = fs.statSync(INDEX_FILE);
+    if (lastIndexCache && stat.mtimeMs === lastIndexMtime) {
+      return lastIndexCache;
     }
+
+    const indexMap = new Map();
+    const fileStream = fs.createReadStream(INDEX_FILE);
+    const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
+
+    for await (const line of rl) {
+      if (!line.trim()) continue;
+      try {
+        const data = JSON.parse(line);
+        if (data.id) {
+          indexMap.set(data.id, {
+            id: data.id,
+            threadName: data.thread_name || 'Untitled Thread',
+            updatedAt: data.updated_at
+          });
+        }
+      } catch (e) {
+        // ignore malformed lines
+      }
+    }
+
+    lastIndexCache = indexMap;
+    lastIndexMtime = stat.mtimeMs;
+    return indexMap;
+  } catch (e) {
+    return lastIndexCache || new Map();
   }
-  return indexMap;
 }
 
 /**
@@ -57,9 +74,15 @@ export function findSessionFiles(dir = SESSIONS_DIR) {
 }
 
 /**
- * Parses a single session JSONL file with full turn-by-turn breakdown
+ * Parses a single session JSONL file with full turn-by-turn breakdown (with mtime caching)
  */
 export async function parseSessionFile(filePath) {
+  const stat = fs.statSync(filePath);
+  const cached = fileCache.get(filePath);
+  if (cached && cached.mtimeMs === stat.mtimeMs) {
+    return cached.session;
+  }
+
   const fileStream = fs.createReadStream(filePath);
   const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
 
@@ -68,7 +91,6 @@ export async function parseSessionFile(filePath) {
   let latestTotalUsage = null;
   const turns = [];
   let currentTurn = null;
-  let turnCounter = 0;
 
   for await (const line of rl) {
     if (!line.trim()) continue;
@@ -79,64 +101,52 @@ export async function parseSessionFile(filePath) {
       continue;
     }
 
-    const { type, payload, timestamp } = entry;
+    const { type, payload } = entry;
 
     if (type === 'session_meta' && payload) {
       sessionMeta = {
-        sessionId: payload.session_id || payload.id,
+        sessionId: payload.id,
         id: payload.id,
-        parentThreadId: payload.parent_thread_id,
         cwd: payload.cwd || '',
-        model: payload.thread_settings?.model || payload.originator || 'codex',
+        model: payload.model_provider || 'codex',
         reasoningEffort: payload.reasoning_effort || 'default',
-        timestamp: timestamp || payload.timestamp,
-        git: payload.git || null
+        timestamp: payload.timestamp || entry.timestamp
       };
     }
 
+    if (type === 'turn_context') {
+      currentTurn = {
+        turnNumber: turns.length + 1,
+        turnId: payload?.turn_id || turns.length + 1,
+        startedAt: entry.timestamp,
+        userPrompt: '',
+        assistantMessage: '',
+        toolCalls: [],
+        tokenUsage: null,
+        rateLimits: null,
+        noiseSpikes: []
+      };
+      turns.push(currentTurn);
+    }
+
     if (type === 'event_msg' && payload) {
-      if (payload.type === 'thread_settings_applied' && payload.thread_settings) {
-        if (sessionMeta) {
-          sessionMeta.model = payload.thread_settings.model || sessionMeta.model;
-          sessionMeta.reasoningEffort = payload.thread_settings.reasoning_effort || sessionMeta.reasoningEffort;
-        }
-      }
-
-      if (payload.type === 'task_started') {
-        turnCounter++;
-        currentTurn = {
-          turnNumber: turnCounter,
-          turnId: payload.turn_id,
-          startedAt: timestamp,
-          completedAt: null,
-          durationMs: 0,
-          userPrompt: '',
-          assistantMessage: '',
-          toolCalls: [],
-          tokenUsage: null,
-          noiseSpikes: []
-        };
-        turns.push(currentTurn);
-      }
-
       if (payload.type === 'token_count') {
-        if (payload.info?.total_token_usage) {
-          latestTotalUsage = { ...payload.info.total_token_usage };
+        const info = payload.info || {};
+        if (info.total_token_usage) {
+          latestTotalUsage = info.total_token_usage;
+        }
+        if (info.last_token_usage && currentTurn) {
+          currentTurn.tokenUsage = info.last_token_usage;
         }
         if (payload.rate_limits) {
-          latestRateLimits = {
-            ...payload.rate_limits,
-            timestamp
-          };
-        }
-        if (currentTurn && payload.info?.last_token_usage) {
-          currentTurn.tokenUsage = { ...payload.info.last_token_usage };
+          latestRateLimits = payload.rate_limits;
+          if (currentTurn) {
+            currentTurn.rateLimits = payload.rate_limits;
+          }
         }
       }
 
-      if (payload.type === 'task_complete' && currentTurn) {
-        currentTurn.completedAt = timestamp;
-        currentTurn.durationMs = payload.duration_ms || 0;
+      if (payload.type === 'agent_state' && currentTurn) {
         if (payload.last_agent_message && !currentTurn.assistantMessage) {
           currentTurn.assistantMessage = typeof payload.last_agent_message === 'string' 
             ? payload.last_agent_message 
@@ -152,7 +162,6 @@ export async function parseSessionFile(filePath) {
             .filter(c => c.type === 'input_text')
             .map(c => c.text)
             .join('\n');
-          // Truncate giant instructions header if present
           currentTurn.userPrompt = texts.length > 500 ? texts.substring(0, 500) + '...' : texts;
         }
         if (payload.role === 'assistant' && currentTurn) {
@@ -199,10 +208,8 @@ export async function parseSessionFile(filePath) {
     }
   }
 
-  const stat = fs.statSync(filePath);
   const sessionId = sessionMeta?.sessionId || path.basename(filePath).replace('.jsonl', '');
-
-  return {
+  const parsedSession = {
     filePath,
     fileSize: stat.size,
     sessionId,
@@ -225,27 +232,40 @@ export async function parseSessionFile(filePath) {
     turnCount: turns.length,
     turns
   };
+
+  fileCache.set(filePath, {
+    mtimeMs: stat.mtimeMs,
+    session: parsedSession
+  });
+
+  return parsedSession;
 }
 
 /**
- * Ingests all sessions and returns structured data
+ * Ingests all sessions concurrently with fast mtime caching
  */
 export async function getAllSessions() {
-  const indexMap = await getSessionIndex();
-  const sessionFiles = findSessionFiles();
+  const [indexMap, sessionFiles] = await Promise.all([
+    getSessionIndex(),
+    Promise.resolve(findSessionFiles())
+  ]);
 
-  const sessions = [];
-  for (const file of sessionFiles) {
+  const sessionPromises = sessionFiles.map(async (file) => {
     try {
       const session = await parseSessionFile(file);
       const indexEntry = indexMap.get(session.sessionId) || indexMap.get(session.meta.id);
-      session.threadName = indexEntry?.threadName || 'Codex Task ' + session.sessionId.substring(0, 8);
-      session.updatedAt = indexEntry?.updatedAt || session.meta.timestamp;
-      sessions.push(session);
+      return {
+        ...session,
+        threadName: indexEntry?.threadName || 'Codex Task ' + session.sessionId.substring(0, 8),
+        updatedAt: indexEntry?.updatedAt || session.meta.timestamp
+      };
     } catch (e) {
-      // skip unreadable files
+      return null;
     }
-  }
+  });
+
+  const resolved = await Promise.all(sessionPromises);
+  const sessions = resolved.filter(Boolean);
 
   // Sort by most recent
   sessions.sort((a, b) => new Date(b.updatedAt || b.meta.timestamp) - new Date(a.updatedAt || a.meta.timestamp));
