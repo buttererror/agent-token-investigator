@@ -11,15 +11,26 @@ export function useTokenData() {
   const isRecordsLoading = ref(false);
   const error = ref(null);
   const selectedSession = ref(null);
-  const activeWorkspace = ref('/home/ellol/solutions/clinic-platform');
+
+  const getSavedWorkspace = () => {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const saved = localStorage.getItem('agent_tracker_workspace');
+        if (saved) return saved;
+      }
+    } catch {}
+    return '/home/ellol/apps/agent-token-tracker';
+  };
+
+  const activeWorkspace = ref(getSavedWorkspace());
   const isAutoRefresh = ref(true);
 
   let pollTimer = null;
 
-  async function fetchGuidanceRecords(projectPath = activeWorkspace.value) {
+  async function fetchGuidanceRecords() {
     isRecordsLoading.value = true;
     try {
-      const res = await fetch(`/api/guidance-records?projectPath=${encodeURIComponent(projectPath || 'all')}`);
+      const res = await fetch('/api/guidance-records?projectPath=all');
       if (res.ok) {
         guidanceRecords.value = await res.json();
       }
@@ -34,7 +45,12 @@ export function useTokenData() {
     try {
       const res = await fetch('/api/projects');
       if (res.ok) {
-        projects.value = await res.json();
+        const list = await res.json();
+        projects.value = list;
+        // If current workspace is not set or not in defaults, verify
+        if (!activeWorkspace.value && list.length > 0) {
+          activeWorkspace.value = list[0].path;
+        }
       }
     } catch (err) {
       console.error('Failed to load tracked projects:', err);
@@ -64,8 +80,14 @@ export function useTokenData() {
   }
 
   function setWorkspace(path) {
+    if (!path) return;
     activeWorkspace.value = path;
-    fetchGuidanceRecords(path);
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('agent_tracker_workspace', path);
+      }
+    } catch {}
+    fetchGuidanceRecords();
   }
 
   async function fetchAll() {

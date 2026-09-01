@@ -143,6 +143,10 @@ async function confirmAndApply() {
   fetchLocalDiagnostics();
 }
 
+watch(() => props.activeWorkspace, () => {
+  fetchLocalDiagnostics(activeScopeMode.value, filterDate.value, filterSessionId.value);
+});
+
 onMounted(() => {
   fetchLocalDiagnostics('all');
 });

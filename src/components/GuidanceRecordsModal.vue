@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import Tooltip from './common/Tooltip.vue';
 
 const props = defineProps({
@@ -36,11 +36,27 @@ const newTargetFile = ref('AGENTS.md');
 const newAuthor = ref('Pair Programming Agent');
 const formError = ref('');
 
+watch(() => props.activeWorkspace, (newVal) => {
+  if (newVal) filterProject.value = newVal;
+});
+
+watch(() => props.isOpen, (open) => {
+  if (open) {
+    filterProject.value = props.activeWorkspace || 'all';
+  }
+});
+
+function normalize(p) {
+  if (!p) return '';
+  return p.replace(/[\/\\]+$/, '').toLowerCase();
+}
+
 const filteredRecords = computed(() => {
   if (!filterProject.value || filterProject.value === 'all') {
     return props.records;
   }
-  return props.records.filter(r => r.projectPath === filterProject.value);
+  const target = normalize(filterProject.value);
+  return props.records.filter(r => normalize(r.projectPath) === target);
 });
 
 const stats = computed(() => {
@@ -231,8 +247,13 @@ function formatDate(isoStr) {
 
         <div v-else-if="filteredRecords.length === 0" class="empty-records">
           <div class="empty-icon">📂</div>
-          <h4>No guidance records found for this scope</h4>
+          <h4>No guidance records found for {{ filterProject === 'all' ? 'any project' : 'this project' }}</h4>
           <p>When recommendations are applied from the Guided Optimizer or manually documented, their What, Why, and How records will appear here.</p>
+          <div v-if="filterProject !== 'all' && records.length > 0" style="margin-top: 14px;">
+            <button class="btn btn-secondary btn-sm" @click="filterProject = 'all'">
+              🌐 View All Projects ({{ records.length }} records)
+            </button>
+          </div>
         </div>
 
         <div v-else class="records-timeline">
