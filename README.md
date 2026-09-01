@@ -38,18 +38,22 @@ node cli.js
    - **1-Click Copy Agent Prompt**: Produces a ready-to-paste instruction for Codex (`"Please resolve @docs/tokens-consumptions/issues/issue-*.md"`).
    - Integrated in-app Issue Manager (`📋 Issues (docs/)` in header) to browse, preview, and clean up active work orders.
 
-4. **Multi-Project Scope & File System Browser**:
+4. **Direct 2-Way Agent Switcher (`🤖 Codex` ⇄ `🌌 Antigravity`)**:
+   - Flip between OpenAI Codex CLI sessions (`~/.codex/sessions/`) and Google Antigravity trajectories (`~/.gemini/antigravity/brain/`) instantly.
+   - Clean 2-way toggle with zero mixed or intermediate states: each agent's metrics, turn history, and quota rates are cleanly isolated and reflected.
+
+5. **Multi-Project Scope & File System Browser**:
    - Switch between repositories dynamically or view aggregate metrics across all projects.
    - Built-in **Directory Explorer (`📁+`)** allowing you to browse your local computer and add any codebase with automatic detection of Node.js, Python, Rust, Go, Git, and `AGENTS.md`.
 
-5. **Pre-Flight Prompt Token Linter**:
+6. **Pre-Flight Prompt Token Linter**:
    - Interactive scratchpad to test draft prompts for token expansion risks before sending to an agent.
    - Generates token-lean rewrites with estimated token savings.
 
-6. **State-Preserving Session Handoff Compiler**:
+7. **State-Preserving Session Handoff Compiler**:
    - Extracts task goals, modified files, and last decisions from bloated threads into a clean 1-paragraph prompt to resume in a fresh session saving ~85% input tokens.
 
-7. **Educational Tooltip & Glossary System**:
+8. **Educational Tooltip & Glossary System**:
    - Hoverable `ℹ️` tooltips on every metric, button, and action.
    - Slide-out **Agent Token Guide & Glossary** drawer explaining *Cached Input*, *Reasoning Tokens*, *5-Hour Limits*, *Payload Noise*, and *Progressive Disclosure*.
 

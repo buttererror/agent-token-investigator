@@ -25,7 +25,7 @@ graph LR
     subgraph Normalized Core
         N["Unified Normalized Session Schema"]
         API["REST Endpoints (/api/sessions, /api/overview)"]
-        UI["Vue 3 Frontend (Header Switcher: All | Codex | Antigravity)"]
+        UI["Vue 3 Frontend (2-Way Switcher: 🤖 Codex ⇄ 🌌 Antigravity)"]
     end
 
     C --> CA --> N
@@ -104,9 +104,10 @@ interface NormalizedSession {
 
 ---
 
-## 4. 1-Click Agent Switcher (UI)
+## 4. Direct 2-Way Agent Switcher (UI)
 
-In [`HeaderNav.vue`](file:///home/ellol/apps/agent-token-tracker/src/components/HeaderNav.vue), users can switch the active analytical filter with a single click:
-- **`⚡ All`**: View global token velocity, unified metrics, and sessions across all agents.
-- **`🤖 Codex`**: Isolate metrics, rate limits, and recommendations strictly to Codex sessions.
-- **`🌌 Antigravity`**: Isolate metrics, reasoning burn, and turn footprints to Antigravity sessions.
+In [`HeaderNav.vue`](file:///home/ellol/apps/agent-token-tracker/src/components/HeaderNav.vue), users flip between the two active agent runners with a dedicated 2-way toggle:
+- **`🤖 Codex`**: Isolates token metrics, rate limits, turn inspections, and recommendations strictly to OpenAI Codex sessions.
+- **`🌌 Antigravity`**: Isolates token metrics, reasoning burn, tool calls, and turn footprints strictly to Google Antigravity sessions.
+
+All dashboard cards, overview totals, and session lists dynamically re-compute to reflect the chosen agent immediately without an intermediate or mixed state.
