@@ -224,58 +224,322 @@ const generatedIssues = ref({});
 const isGeneratingAllIssues = ref(false);
 const allIssuesGeneratedMessage = ref('');
 
-async function handleGenerateTurnIssue(turn) {
-  generatedIssues.value[turn.turnNumber] = { status: 'generating' };
+// Issue Preview & Selective Copy Modal State
+const isPreviewModalOpen = ref(false);
+const isPreviewEditingDoc = ref(false);
+const previewItems = ref([]); // [{ turnNumber, headline, turn, fileName, agentPrompt, content, savings, selected, isEdited }]
+const activePreviewIndex = ref(0);
+const previewCopiedType = ref(null);
+const isSavingPreviewDocs = ref(false);
+const previewToastMsg = ref('');
+
+function generateDocForTurn(turn) {
+  const sessionId = props.session?.sessionId || props.session?.meta?.id || 'session';
+  const sessionShort = sessionId.substring(0, 8);
+  const turnNum = turn?.turnNumber || 1;
+  const fileName = `issue-turn-${turnNum}-${sessionShort}.md`;
+
+  const inp = turn.tokenUsage?.input_tokens || 0;
+  const cached = turn.tokenUsage?.cached_input_tokens || 0;
+  const fresh = Math.max(inp - cached, 0);
+  const out = turn.tokenUsage?.output_tokens || 0;
+  const think = turn.tokenUsage?.reasoning_output_tokens || 0;
+  const total = inp + out;
+  const cacheHitRate = inp > 0 ? Math.round((cached / inp) * 100) : 0;
+
+  const hasTests = turn.toolCalls?.some(tc => JSON.stringify(tc || '').toLowerCase().includes('test'));
+  const hasFileSpike = fresh > 25000;
+  const hasManyTools = (turn.toolCalls?.length || 0) >= 4;
+
+  let problemHeadline = 'Uncached Context Inflation & File Noise';
+  let problemDetails = `Turn #${turnNum} injected ${fresh.toLocaleString()} fresh un-cached tokens into prompt history.`;
+  let projectedSavingsTokens = Math.round(fresh * 0.85);
+  let badExample = 'Running unconstrained file reads or unbounded searches without line ranges.';
+  let goodExample = 'Using grep_search with StartLine/EndLine slices or targeted symbol inspection.';
+  let resolutionRules = `- Practice progressive disclosure: always inspect targeted line ranges (StartLine/EndLine) rather than reading entire files into prompt context.`;
+
+  if (hasTests) {
+    problemHeadline = 'Unfiltered Test Suite Console Noise';
+    problemDetails = `Executed test commands without bail or silent flags, dumping raw passing logs and stack traces (~${inp.toLocaleString()} tokens).`;
+    projectedSavingsTokens = Math.round(inp * 0.95);
+    badExample = '```bash\npnpm test\n# Dumps dozens of passing test logs into prompt context\n```';
+    goodExample = '```bash\npnpm test -- --bail 1 --silent\n# Halts on first error, output payload < 400 tokens\n```';
+    resolutionRules = `- When executing test suites, always pass \`--bail 1\` and \`--silent\` to keep context lean.\n- Add \`"test:agent": "vitest run --bail 1 --silent"\` to \`package.json\`.`;
+  } else if (hasFileSpike) {
+    problemHeadline = 'Full-File Reading Instead of Targeted Line Slices';
+    problemDetails = `Loaded entire file contents into prompt context rather than using progressive disclosure with line ranges.`;
+    projectedSavingsTokens = Math.round(fresh * 0.9);
+    badExample = '```bash\nview_file /path/to/LargeFile.js\n# Reads entire 800+ lines into context\n```';
+    goodExample = '```bash\ngrep_search query: "targetSymbol" + view_file StartLine: 40 EndLine: 85\n# Reads only 45 relevant lines\n```';
+    resolutionRules = `- Practice progressive disclosure: always inspect targeted line ranges (\`StartLine\`/\`EndLine\`) rather than reading entire files into prompt context.\n- Never read files over 200 lines in full when making localized edits.`;
+  } else if (hasManyTools) {
+    problemHeadline = 'Dense Multi-Step Tool Execution Carryover';
+    problemDetails = `Executed ${turn.toolCalls.length} distinct tool calls in a single conversational turn, inflating turn payload.`;
+    projectedSavingsTokens = Math.round(inp * 0.6);
+    badExample = 'Prompting multi-phase architectural chores across sequential tool calls in a single unbounded turn.';
+    goodExample = 'Packaging the verification sequence into a modular `.agents/skills/verify-slice/SKILL.md` skill.';
+    resolutionRules = `- Package repetitive multi-turn test/lint workflows into modular \`.agents/skills/\` with \`allow_implicit_invocation: false\`.`;
+  }
+
+  const agentPrompt = `Please inspect and resolve the token inefficiency documented in @docs/tokens-consumptions/issues/${fileName}. Apply the recommended rules to AGENTS.md or package.json, verify with silent flags, and ensure all changes preserve documentation integrity.`;
+
+  const toolSummary = (!turn.toolCalls || turn.toolCalls.length === 0) 
+    ? 'No tool invocations recorded in this turn.'
+    : turn.toolCalls.map((t, i) => {
+        let inputPreview = '';
+        if (typeof t.input === 'string') inputPreview = t.input.substring(0, 120);
+        else if (typeof t.input === 'object' && t.input) {
+          inputPreview = t.input.cmd || t.input.command || t.input.AbsolutePath || t.input.Pattern || JSON.stringify(t.input).substring(0, 120);
+        }
+        return `${i + 1}. \`${t.tool}\`: \`${inputPreview}\``;
+      }).join('\n');
+
+  const markdownContent = `# 📋 Agent Work Order: Token Inefficiency Resolution
+> **Issue ID**: \`ISSUE-TURN-${turnNum}-${sessionShort}\`  
+> **Status**: \`ACTIONABLE / PENDING AGENT TAKEOVER\`  
+> **Target Workspace**: \`${props.activeWorkspace || ''}\`  
+> **Created Date**: ${new Date().toISOString().split('T')[0]}  
+> **Author**: Agent Token Tracker Diagnostic Engine  
+
+---
+
+## 🤖 Handoff Directive for the Project AI Agent
+
+\`\`\`markdown
+${agentPrompt}
+\`\`\`
+
+---
+
+## 1. Session Telemetry & Context
+
+| Metric | Recorded Value | Evaluation |
+| :--- | :--- | :--- |
+| **Session ID** | \`${sessionId}\` | Trajectory file: \`${props.session?.filePath || ''}\` |
+| **Thread Goal** | **${props.session?.threadName || 'Untitled Session'}** | User conversation topic |
+| **Turn Number** | **Turn #${turnNum}** | Step where spike occurred |
+| **Total Turn Context** | **${total.toLocaleString()} tokens** | High context accumulation |
+| **Fresh Uncached Payload** | **${fresh.toLocaleString()} tokens** | 🚨 **Spike Source** |
+| **Cached Context** | **${cached.toLocaleString()} tokens (${cacheHitRate}%)** | Cache retention |
+| **Reasoning Tokens** | **${think.toLocaleString()} tokens** | Model deliberation |
+| **Model Response Output** | **${out.toLocaleString()} tokens** | Output payload |
+
+---
+
+## 2. Root Cause Analysis
+
+### 🚨 Problem: **${problemHeadline}**
+${problemDetails}
+
+### 🔍 User Request in this Turn:
+> *${turn.userPrompt ? String(turn.userPrompt).replace(/\n/g, ' ') : 'No user prompt recorded.'}*
+
+### 🔧 Tool Invocations Observed (${turn.toolCalls?.length || 0}):
+${(turn.toolCalls || []).map((t, i) => `${i + 1}. \`${t.tool}\`: \`${typeof t.input === 'string' ? t.input.substring(0, 80) : JSON.stringify(t.input || '').substring(0, 80)}\``).join('\n') || 'None'}
+
+---
+
+## 3. Projected Impact & Waste
+
+- **Estimated Token Waste**: **~${projectedSavingsTokens.toLocaleString()} tokens**
+- **5-Hour Rate Limit Quota Reclaimed**: **~${Math.min(Math.round((projectedSavingsTokens / 250000) * 100), 75)}% of rolling budget**
+- **Financial Cost Saved**: **~$${((projectedSavingsTokens / 1000000) * 2.50).toFixed(3)} / session run**
+
+---
+
+## 4. Autonomous Agent Step-by-Step Resolution Plan
+
+When an agent takes over this task, execute these exact steps:
+
+1. **Step 1: Inspect Target Configuration Files**:
+   - Inspect [AGENTS.md](AGENTS.md) and [package.json](package.json) using line slices.
+
+2. **Step 2: Apply Optimization Rule**:
+   - Add the following convention to [AGENTS.md](AGENTS.md) under a \`## Token Optimization Rules\` section:
+\`\`\`markdown
+${resolutionRules}
+\`\`\`
+
+3. **Step 3: Verification**:
+   - Run the project test suite using silent flags to verify no regressions:
+\`\`\`bash
+npm run test:agent || npm test -- --bail 1 --silent
+\`\`\`
+
+---
+
+## 5. Concrete Code Examples
+
+### ❌ Inefficient Pattern (Observed in Turn #${turnNum}):
+${badExample}
+
+### ✅ Lean & Cached Pattern (Expected Standard):
+${goodExample}
+`;
+
+  return {
+    turnNumber: turnNum,
+    turn,
+    headline: problemHeadline,
+    fileName,
+    agentPrompt,
+    content: markdownContent,
+    savings: projectedSavingsTokens,
+    selected: true
+  };
+}
+
+function openSingleTurnPreview(turn) {
+  const item = generateDocForTurn(turn);
+  previewItems.value = [item];
+  activePreviewIndex.value = 0;
+  isPreviewEditingDoc.value = false;
+  isPreviewModalOpen.value = true;
+  previewToastMsg.value = '';
+}
+
+function openAllTurnsPreview() {
+  const allTurns = props.session?.turns || [];
+  // Candidate turns meeting optimization threshold, or all turns if few
+  let candidates = allTurns.filter(t => 
+    (t.noiseSpikes?.length > 0) || 
+    ((t.tokenUsage?.input_tokens - t.tokenUsage?.cached_input_tokens) > 15000) ||
+    (t.toolCalls?.length >= 3)
+  );
+
+  if (candidates.length === 0) {
+    candidates = allTurns;
+  }
+
+  previewItems.value = candidates.map(t => generateDocForTurn(t));
+  activePreviewIndex.value = 0;
+  isPreviewEditingDoc.value = false;
+  isPreviewModalOpen.value = true;
+  previewToastMsg.value = '';
+}
+
+function toggleSelectAll(select) {
+  previewItems.value.forEach(item => {
+    item.selected = select;
+  });
+}
+
+const selectedPreviewCount = computed(() => {
+  return previewItems.value.filter(i => i.selected).length;
+});
+
+const currentPreviewItem = computed(() => {
+  return previewItems.value[activePreviewIndex.value] || null;
+});
+
+function copyActiveItemPrompt() {
+  const item = currentPreviewItem.value;
+  if (!item) return;
+  navigator.clipboard.writeText(item.agentPrompt);
+  previewCopiedType.value = 'active_prompt';
+  setTimeout(() => { previewCopiedType.value = null; }, 2000);
+}
+
+function copyActiveItemDoc() {
+  const item = currentPreviewItem.value;
+  if (!item) return;
+  navigator.clipboard.writeText(item.content);
+  previewCopiedType.value = 'active_doc';
+  setTimeout(() => { previewCopiedType.value = null; }, 2000);
+}
+
+function copySelectedPrompts() {
+  const selected = previewItems.value.filter(i => i.selected);
+  if (selected.length === 0) return;
+  const combined = selected.map(i => i.agentPrompt).join('\n\n');
+  navigator.clipboard.writeText(combined);
+  previewCopiedType.value = 'selected_prompts';
+  setTimeout(() => { previewCopiedType.value = null; }, 2000);
+}
+
+function copySelectedDocs() {
+  const selected = previewItems.value.filter(i => i.selected);
+  if (selected.length === 0) return;
+  const combined = selected.map(i => i.content).join('\n\n---\n\n');
+  navigator.clipboard.writeText(combined);
+  previewCopiedType.value = 'selected_docs';
+  setTimeout(() => { previewCopiedType.value = null; }, 2000);
+}
+
+async function saveActiveItemDocToDisk() {
+  const item = currentPreviewItem.value;
+  if (!item) return;
+  isSavingPreviewDocs.value = true;
+  previewToastMsg.value = '';
   try {
-    const res = await fetch('/api/generate-turn-issue', {
+    const res = await fetch('/api/token-issues/save', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         projectPath: props.activeWorkspace,
-        session: {
-          sessionId: props.session?.sessionId,
-          threadName: props.session?.threadName,
-          filePath: props.session?.filePath,
-          meta: props.session?.meta
-        },
-        turn
+        fileName: item.fileName,
+        content: item.content
       })
     });
     if (res.ok) {
-      const data = await res.json();
-      generatedIssues.value[turn.turnNumber] = {
+      generatedIssues.value[item.turnNumber] = {
         status: 'success',
-        fileName: data.fileName,
-        relativePath: data.relativePath,
-        savings: data.savings
+        fileName: item.fileName,
+        relativePath: `docs/tokens-consumptions/issues/${item.fileName}`,
+        savings: item.savings
       };
+      previewToastMsg.value = `Successfully saved ${item.fileName} to docs/tokens-consumptions/issues/`;
       emit('guidance-updated');
+      setTimeout(() => { previewToastMsg.value = ''; }, 4000);
     } else {
-      generatedIssues.value[turn.turnNumber] = { status: 'error' };
+      const data = await res.json();
+      alert(`Failed to save: ${data.error || 'Unknown error'}`);
     }
   } catch (e) {
-    generatedIssues.value[turn.turnNumber] = { status: 'error' };
-  }
-}
-
-async function handleGenerateAllIssues() {
-  isGeneratingAllIssues.value = true;
-  try {
-    const turnsToGenerate = (props.session?.turns || []).filter(t => 
-      (t.noiseSpikes?.length > 0) || 
-      ((t.tokenUsage?.input_tokens - t.tokenUsage?.cached_input_tokens) > 15000) ||
-      (t.toolCalls?.length >= 3)
-    );
-
-    for (const turn of turnsToGenerate) {
-      await handleGenerateTurnIssue(turn);
-    }
-    allIssuesGeneratedMessage.value = `Generated ${turnsToGenerate.length} issue report(s) in docs/token-consumption/issues/`;
-    setTimeout(() => { allIssuesGeneratedMessage.value = ''; }, 4000);
+    alert(`Failed to save: ${e.message}`);
   } finally {
-    isGeneratingAllIssues.value = false;
+    isSavingPreviewDocs.value = false;
   }
 }
+
+async function saveSelectedDocsToDisk() {
+  const selected = previewItems.value.filter(i => i.selected);
+  if (selected.length === 0) return;
+  isSavingPreviewDocs.value = true;
+  previewToastMsg.value = '';
+  try {
+    let savedCount = 0;
+    for (const item of selected) {
+      // Save directly using backend endpoint
+      const res = await fetch('/api/token-issues/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectPath: props.activeWorkspace,
+          fileName: item.fileName,
+          content: item.content
+        })
+      });
+      if (res.ok) {
+        generatedIssues.value[item.turnNumber] = {
+          status: 'success',
+          fileName: item.fileName,
+          relativePath: `docs/tokens-consumptions/issues/${item.fileName}`,
+          savings: item.savings
+        };
+        savedCount++;
+      }
+    }
+    previewToastMsg.value = `Successfully saved ${savedCount} issue document(s) to docs/tokens-consumptions/issues/`;
+    emit('guidance-updated');
+    setTimeout(() => { previewToastMsg.value = ''; }, 4000);
+  } catch (e) {
+    alert(`Failed to save docs: ${e.message}`);
+  } finally {
+    isSavingPreviewDocs.value = false;
+  }
+}
+
 
 const sessionVerdict = computed(() => {
   const turns = props.session?.turnCount || 0;
@@ -452,16 +716,15 @@ function formatToolArg(input) {
           <div class="action-btn-group">
             <button 
               class="btn btn-secondary btn-sm"
-              :disabled="isGeneratingAllIssues"
-              @click="handleGenerateAllIssues"
+              @click="openAllTurnsPreview"
             >
-              <span>📑</span> {{ isGeneratingAllIssues ? 'Generating Issues...' : 'Generate docs/ Issues' }}
+              <span>📑</span> Preview & Select Docs Issues
             </button>
             <Tooltip
               placement="bottom"
-              title="Batch Issue Report Generator"
-              text="Scans this session and automatically generates detailed Markdown issue reports in docs/tokens-consumptions/issues/ for heavy turns (>15k fresh un-cached tokens, noise spikes, or >=3 tool calls)."
-              whyItMatters="Creates actionable post-mortem files with copy-pasteable instructions and rules to help agents follow progressive disclosure."
+              title="Batch Issue Report Generator & Preview"
+              text="Scans this session and opens an interactive preview with individual checkboxes to inspect, edit, and choose which turn issue documents to copy or save to docs/tokens-consumptions/issues/."
+              whyItMatters="Allows you to inspect and modify generated work orders before copying or saving them."
             />
           </div>
           <button 
@@ -788,22 +1051,21 @@ function formatToolArg(input) {
               <div class="turn-action-row">
                 <div class="turn-issue-btn-wrap">
                   <button
-                    :disabled="generatedIssues[turn.turnNumber]?.status === 'generating'"
                     :class="['btn-turn-action', { 'is-applied': generatedIssues[turn.turnNumber]?.status === 'success' }]"
-                    @click="handleGenerateTurnIssue(turn)"
+                    @click="openSingleTurnPreview(turn)"
                   >
                     <span class="btn-action-badge">Docs Issue</span>
-                    <span class="btn-action-text">📄 Generate Issue Report in docs/</span>
-                    <span v-if="generatedIssues[turn.turnNumber]?.status === 'generating'" class="spinner-inline">⏳ Writing .md...</span>
-                    <span v-else-if="generatedIssues[turn.turnNumber]?.status === 'success'" class="text-green">✅ Saved Issue</span>
+                    <span class="btn-action-text">📄 Preview & Generate Issue Report</span>
+                    <span v-if="generatedIssues[turn.turnNumber]?.status === 'success'" class="text-green">✅ Saved Issue</span>
                   </button>
                   <Tooltip
                     placement="top"
-                    title="Generate Single Turn Issue"
-                    text="Generates an individual Markdown issue post-mortem file in docs/tokens-consumptions/issues/ detailing the exact tool calls, token waste diagnosis, and recommended agent prompt remedies for this turn."
-                    whyItMatters="Provides targeted guidance and copy-pasteable prompts to fix patterns that caused spikes in this turn."
+                    title="Preview & Generate Single Turn Issue"
+                    text="Opens an interactive preview of the generated Markdown issue document and agent prompt for this turn, allowing you to edit it in real-time before copying or saving to docs/tokens-consumptions/issues/."
+                    whyItMatters="Lets you inspect and modify the telemetry diagnosis and agent prompt before handing off."
                   />
                 </div>
+
 
                 <!-- Feedback for generated issue -->
                 <div v-if="generatedIssues[turn.turnNumber]?.status === 'success'" class="action-feedback-pill">
@@ -838,6 +1100,181 @@ function formatToolArg(input) {
 
         <div v-if="!session?.turns || session.turns.length === 0" class="empty-state">
           No turn details recorded for this session.
+        </div>
+      </div>
+    </div>
+
+    <!-- Turn Issue Document Preview & Selective Copy Modal -->
+    <div v-if="isPreviewModalOpen" class="modal-overlay sub-modal-overlay" @click="isPreviewModalOpen = false">
+      <div class="modal-card modal-lg preview-submodal-card" @click.stop>
+        <div class="modal-head">
+          <div class="head-info">
+            <h3>📑 Issue Document Preview & Selection</h3>
+            <span class="sub-text">
+              Inspect and edit work orders before copying prompts or persisting to <code>docs/tokens-consumptions/issues/</code>
+            </span>
+          </div>
+          <div class="head-actions">
+            <button class="close-btn" @click="isPreviewModalOpen = false">✕</button>
+          </div>
+        </div>
+
+        <div class="modal-body preview-modal-body">
+          <div v-if="previewToastMsg" class="preview-toast-banner">
+            <span>✅ {{ previewToastMsg }}</span>
+          </div>
+
+          <div class="preview-layout">
+            <!-- Left: Turn Selection List -->
+            <div class="preview-sidebar">
+              <div class="preview-sidebar-head">
+                <div class="selection-status">
+                  <strong>{{ selectedPreviewCount }}</strong> of {{ previewItems.length }} Selected
+                </div>
+                <div class="selection-controls" v-if="previewItems.length > 1">
+                  <button class="btn-link-xs" @click="toggleSelectAll(true)">Select All</button>
+                  <span class="sep">•</span>
+                  <button class="btn-link-xs" @click="toggleSelectAll(false)">Deselect</button>
+                </div>
+              </div>
+
+              <div class="preview-items-list">
+                <div 
+                  v-for="(item, idx) in previewItems" 
+                  :key="item.fileName"
+                  :class="['preview-turn-item', { active: activePreviewIndex === idx }]"
+                  @click="activePreviewIndex = idx"
+                >
+                  <div class="preview-item-top">
+                    <label class="checkbox-label" @click.stop>
+                      <input type="checkbox" v-model="item.selected" />
+                      <span class="turn-chip mono">Turn #{{ item.turnNumber }}</span>
+                    </label>
+                    <span class="savings-chip text-green" v-if="item.savings">
+                      ~{{ item.savings.toLocaleString() }} tokens
+                    </span>
+                  </div>
+                  <div class="preview-item-headline">{{ item.headline }}</div>
+                  <div class="preview-item-file mono text-dim text-xs">{{ item.fileName }}</div>
+                </div>
+              </div>
+
+              <!-- Batch Actions in Sidebar when multiple items -->
+              <div class="sidebar-batch-actions" v-if="previewItems.length > 1">
+                <button 
+                  class="btn btn-primary btn-sm w-full"
+                  :disabled="selectedPreviewCount === 0"
+                  @click="copySelectedPrompts"
+                >
+                  <span>📋</span> {{ previewCopiedType === 'selected_prompts' ? 'Prompts Copied!' : `Copy Selected Prompts (${selectedPreviewCount})` }}
+                </button>
+                <button 
+                  class="btn btn-secondary btn-sm w-full"
+                  :disabled="selectedPreviewCount === 0"
+                  @click="copySelectedDocs"
+                >
+                  <span>📄</span> {{ previewCopiedType === 'selected_docs' ? 'Docs Copied!' : `Copy Selected Markdown (${selectedPreviewCount})` }}
+                </button>
+                <button 
+                  class="btn btn-save btn-sm w-full"
+                  :disabled="selectedPreviewCount === 0 || isSavingPreviewDocs"
+                  @click="saveSelectedDocsToDisk"
+                >
+                  <span>💾</span> {{ isSavingPreviewDocs ? 'Saving...' : `Save Selected to docs/ (${selectedPreviewCount})` }}
+                </button>
+              </div>
+            </div>
+
+            <!-- Right: Live Editable Preview Pane -->
+            <div class="preview-content-pane">
+              <div v-if="currentPreviewItem" class="preview-detail-box">
+                <div class="pane-header">
+                  <div class="pane-title-box">
+                    <h4>Turn #{{ currentPreviewItem.turnNumber }}: {{ currentPreviewItem.headline }}</h4>
+                    <span class="pane-path mono text-dim text-xs">docs/tokens-consumptions/issues/{{ currentPreviewItem.fileName }}</span>
+                  </div>
+                  <div class="pane-controls">
+                    <div class="mode-toggle-group">
+                      <button 
+                        :class="['btn', 'btn-xs', !isPreviewEditingDoc ? 'btn-primary' : 'btn-secondary']"
+                        @click="isPreviewEditingDoc = false"
+                      >
+                        👁️ Preview
+                      </button>
+                      <button 
+                        :class="['btn', 'btn-xs', isPreviewEditingDoc ? 'btn-primary' : 'btn-secondary']"
+                        @click="isPreviewEditingDoc = true"
+                      >
+                        ✏️ Edit Doc
+                      </button>
+                    </div>
+                    <button 
+                      class="btn btn-save btn-xs"
+                      :disabled="isSavingPreviewDocs"
+                      @click="saveActiveItemDocToDisk"
+                      title="Save this single issue doc to disk"
+                    >
+                      <span>💾</span> Save This Doc
+                    </button>
+                    <button 
+                      class="btn btn-primary btn-xs"
+                      @click="copyActiveItemPrompt"
+                    >
+                      <span>🤖</span> {{ previewCopiedType === 'active_prompt' ? 'Copied!' : 'Copy Prompt' }}
+                    </button>
+                    <button 
+                      class="btn btn-secondary btn-xs"
+                      @click="copyActiveItemDoc"
+                    >
+                      <span>📄</span> {{ previewCopiedType === 'active_doc' ? 'Copied!' : (isPreviewEditingDoc ? 'Copy Edited Markdown' : 'Copy Markdown') }}
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Agent Prompt Box -->
+                <div class="agent-prompt-section card">
+                  <div class="prompt-sec-head">
+                    <span class="sec-lbl">🤖 Agent Directive / Kickoff Prompt:</span>
+                  </div>
+                  <textarea 
+                    v-if="isPreviewEditingDoc"
+                    v-model="currentPreviewItem.agentPrompt"
+                    class="prompt-textarea mono"
+                    rows="2"
+                    placeholder="Edit agent prompt..."
+                  ></textarea>
+                  <div v-else class="prompt-display mono">
+                    {{ currentPreviewItem.agentPrompt }}
+                  </div>
+                </div>
+
+                <!-- Markdown Content Box -->
+                <div class="markdown-preview-container">
+                  <div class="md-header-bar">
+                    <span class="text-xs text-dim" v-if="isPreviewEditingDoc">
+                      ✏️ In-Place Editing: Modify the issue markdown below before copying or persisting.
+                    </span>
+                    <span class="text-xs text-dim" v-else>
+                      👁️ Issue Document Preview: Switch to Edit Doc to make custom modifications.
+                    </span>
+                  </div>
+                  <textarea 
+                    v-if="isPreviewEditingDoc"
+                    v-model="currentPreviewItem.content"
+                    class="markdown-editor-input mono"
+                    rows="18"
+                    spellcheck="false"
+                    placeholder="Issue document markdown content..."
+                  ></textarea>
+                  <pre v-else class="markdown-raw">{{ currentPreviewItem.content }}</pre>
+                </div>
+              </div>
+
+              <div v-else class="preview-empty-detail">
+                <p>No turn selected for preview.</p>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -1441,5 +1878,282 @@ function formatToolArg(input) {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 10px;
+}
+
+/* Sub-modal Preview & Selection Styles */
+.sub-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(6px);
+  z-index: 1050;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.preview-submodal-card {
+  max-width: 1250px;
+  width: 95vw;
+  height: 90vh;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.preview-modal-body {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 20px;
+}
+
+.preview-toast-banner {
+  background: rgba(34, 197, 94, 0.15);
+  border: 1px solid var(--accent-green);
+  color: var(--accent-green);
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  margin-bottom: 12px;
+}
+
+.preview-layout {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 16px;
+  overflow: hidden;
+  height: 100%;
+}
+
+.preview-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-right: 1px solid var(--border-color);
+  padding-right: 16px;
+  overflow: hidden;
+}
+
+.preview-sidebar-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.82rem;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.selection-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-link-xs {
+  background: transparent;
+  border: none;
+  color: var(--accent-blue);
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 0;
+}
+
+.btn-link-xs:hover {
+  text-decoration: underline;
+}
+
+.preview-items-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.preview-turn-item {
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.preview-turn-item:hover {
+  border-color: var(--accent-blue);
+}
+
+.preview-turn-item.active {
+  border-color: var(--accent-blue);
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.preview-item-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.turn-chip {
+  font-weight: bold;
+  font-size: 0.78rem;
+}
+
+.savings-chip {
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.preview-item-headline {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-main);
+  margin-bottom: 2px;
+}
+
+.sidebar-batch-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-color);
+}
+
+.preview-content-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.preview-detail-box {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 12px;
+  overflow: hidden;
+}
+
+.pane-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.pane-title-box h4 {
+  font-size: 0.95rem;
+  margin: 0;
+}
+
+.pane-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.agent-prompt-section {
+  padding: 10px 12px;
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+}
+
+.prompt-sec-head {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--accent-purple);
+  margin-bottom: 6px;
+}
+
+.prompt-textarea {
+  width: 100%;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  padding: 8px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  resize: vertical;
+}
+
+.prompt-display {
+  font-size: 0.78rem;
+  color: var(--text-main);
+  background: var(--bg-input);
+  padding: 8px 10px;
+  border-radius: 6px;
+  line-height: 1.4;
+  user-select: all;
+}
+
+.markdown-preview-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.md-header-bar {
+  margin-bottom: 8px;
+}
+
+.markdown-editor-input {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  border: none;
+  color: var(--text-main);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  resize: none;
+  outline: none;
+  font-family: monospace;
+}
+
+.markdown-raw {
+  flex: 1;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--text-main);
+  font-family: monospace;
+  margin: 0;
+}
+
+.preview-empty-detail {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-dim);
+}
+
+.w-full {
+  width: 100%;
 }
 </style>

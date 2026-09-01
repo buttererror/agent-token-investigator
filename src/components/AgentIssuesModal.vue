@@ -20,6 +20,10 @@ const isLoading = ref(false);
 const error = ref(null);
 const selectedIssue = ref(null);
 const viewingContent = ref('');
+const editableContent = ref('');
+const isEditingDoc = ref(false);
+const isSavingDoc = ref(false);
+const saveSuccessMsg = ref('');
 const isContentLoading = ref(false);
 const copiedId = ref(null);
 
@@ -47,16 +51,51 @@ async function viewIssue(issue) {
   selectedIssue.value = issue;
   isContentLoading.value = true;
   viewingContent.value = '';
+  editableContent.value = '';
+  isEditingDoc.value = false;
+  saveSuccessMsg.value = '';
   try {
     const res = await fetch(`/api/token-issues/read?projectPath=${encodeURIComponent(props.activeWorkspace)}&fileName=${encodeURIComponent(issue.fileName)}`);
     if (res.ok) {
       const data = await res.json();
       viewingContent.value = data.content;
+      editableContent.value = data.content;
     }
   } catch (e) {
     viewingContent.value = `Failed to load issue content: ${e.message}`;
+    editableContent.value = viewingContent.value;
   } finally {
     isContentLoading.value = false;
+  }
+}
+
+async function saveDocChanges() {
+  if (!selectedIssue.value) return;
+  isSavingDoc.value = true;
+  saveSuccessMsg.value = '';
+  try {
+    const res = await fetch('/api/token-issues/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        projectPath: props.activeWorkspace,
+        fileName: selectedIssue.value.fileName,
+        content: editableContent.value
+      })
+    });
+    if (res.ok) {
+      viewingContent.value = editableContent.value;
+      saveSuccessMsg.value = 'Changes saved successfully!';
+      setTimeout(() => { saveSuccessMsg.value = ''; }, 3000);
+      await fetchIssues();
+    } else {
+      const data = await res.json();
+      alert(`Failed to save: ${data.error || 'Unknown error'}`);
+    }
+  } catch (e) {
+    alert(`Failed to save: ${e.message}`);
+  } finally {
+    isSavingDoc.value = false;
   }
 }
 
@@ -75,6 +114,7 @@ async function deleteIssue(issue) {
       if (selectedIssue.value?.fileName === issue.fileName) {
         selectedIssue.value = null;
         viewingContent.value = '';
+        editableContent.value = '';
       }
       await fetchIssues();
     }
@@ -93,13 +133,15 @@ function copyPrompt(issue) {
 }
 
 function copyContent() {
-  if (!viewingContent.value) return;
-  navigator.clipboard.writeText(viewingContent.value);
+  const textToCopy = isEditingDoc.value ? editableContent.value : viewingContent.value;
+  if (!textToCopy) return;
+  navigator.clipboard.writeText(textToCopy);
   copiedId.value = 'full_content';
   setTimeout(() => {
     copiedId.value = null;
   }, 2000);
 }
+
 
 watch(() => props.isOpen, (open) => {
   if (open) {
@@ -211,13 +253,39 @@ onMounted(() => {
                   <span class="preview-path mono text-dim">{{ selectedIssue.relativePath }}</span>
                 </div>
                 <div class="preview-controls">
+                  <div class="mode-toggle-group">
+                    <button 
+                      :class="['btn', 'btn-xs', !isEditingDoc ? 'btn-primary' : 'btn-secondary']"
+                      @click="isEditingDoc = false"
+                    >
+                      👁️ Preview
+                    </button>
+                    <button 
+                      :class="['btn', 'btn-xs', isEditingDoc ? 'btn-primary' : 'btn-secondary']"
+                      @click="isEditingDoc = true"
+                    >
+                      ✏️ Edit Doc
+                    </button>
+                  </div>
+                  <button 
+                    v-if="isEditingDoc"
+                    class="btn btn-save btn-sm" 
+                    :disabled="isSavingDoc"
+                    @click="saveDocChanges"
+                  >
+                    <span>💾</span> {{ isSavingDoc ? 'Saving...' : 'Save Changes' }}
+                  </button>
                   <button class="btn btn-primary btn-sm" @click="copyPrompt(selectedIssue)">
-                    <span>🤖</span> {{ copiedId === selectedIssue.fileName ? 'Prompt Copied!' : 'Copy Agent Handoff Prompt' }}
+                    <span>🤖</span> {{ copiedId === selectedIssue.fileName ? 'Prompt Copied!' : 'Copy Agent Prompt' }}
                   </button>
                   <button class="btn btn-secondary btn-sm" @click="copyContent">
-                    <span>📄</span> {{ copiedId === 'full_content' ? 'Copied Full Doc!' : 'Copy Markdown' }}
+                    <span>📄</span> {{ copiedId === 'full_content' ? 'Copied Full Doc!' : (isEditingDoc ? 'Copy Edited Markdown' : 'Copy Markdown') }}
                   </button>
                 </div>
+              </div>
+
+              <div v-if="saveSuccessMsg" class="save-toast-banner">
+                <span>✅ {{ saveSuccessMsg }}</span>
               </div>
 
               <!-- Ready-to-use Prompt Banner -->
@@ -231,10 +299,22 @@ onMounted(() => {
                 </div>
               </div>
 
-              <!-- Markdown Viewer -->
+              <!-- Markdown Viewer / Editor -->
               <div class="markdown-viewer">
                 <div v-if="isContentLoading" class="viewer-loading">
                   ⏳ Reading markdown content...
+                </div>
+                <div v-else-if="isEditingDoc" class="editor-container">
+                  <div class="editor-meta-bar">
+                    <span class="text-xs text-dim">Editing <code>{{ selectedIssue.fileName }}</code> directly. Edits will be copied or saved to <code>docs/tokens-consumptions/issues/</code>.</span>
+                  </div>
+                  <textarea 
+                    v-model="editableContent" 
+                    class="markdown-editor-input mono"
+                    placeholder="Enter or modify markdown documentation..."
+                    rows="20"
+                    spellcheck="false"
+                  ></textarea>
                 </div>
                 <pre v-else class="markdown-raw">{{ viewingContent }}</pre>
               </div>
@@ -497,12 +577,83 @@ onMounted(() => {
 
 .preview-controls {
   display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
+}
+
+.mode-toggle-group {
+  display: flex;
+  background: var(--bg-hover);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.btn-xs {
+  font-size: 0.72rem;
+  padding: 3px 8px;
+}
+
+.btn-save {
+  background: var(--accent-green);
+  color: #090d16;
+  font-weight: 600;
+  border: none;
+}
+
+.btn-save:hover:not(:disabled) {
+  opacity: 0.9;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
+}
+
+.save-toast-banner {
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  color: var(--accent-green);
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 6px;
+}
+
+.editor-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 8px;
+}
+
+.editor-meta-bar {
+  padding-bottom: 4px;
+}
+
+.markdown-editor-input {
+  flex: 1;
+  width: 100%;
+  min-height: 280px;
+  background: #090d16;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 12px;
+  color: #e2e8f0;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.markdown-editor-input:focus {
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.25);
 }
 
 .agent-prompt-banner {
   background: rgba(16, 185, 129, 0.08);
   border: 1px solid rgba(16, 185, 129, 0.3);
+
   border-radius: 8px;
   padding: 10px 14px;
   display: flex;

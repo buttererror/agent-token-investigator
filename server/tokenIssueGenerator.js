@@ -349,3 +349,14 @@ export function deleteTokenIssue(projectPath, fileName) {
   }
   return false;
 }
+
+/**
+ * Saves/updates edited content of a specific issue doc
+ */
+export function saveTokenIssue(projectPath, fileName, content) {
+  const targetDir = getIssueDirectory(projectPath);
+  const fullPath = path.join(targetDir, fileName);
+  fs.writeFileSync(fullPath, content, 'utf8');
+  return true;
+}
+

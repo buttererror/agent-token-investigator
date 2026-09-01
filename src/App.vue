@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue';
+import { ref, onMounted  } from 'vue';
 import { useTokenData } from './composables/useTokenData.js';
 import { useActionSelector } from './composables/useActionSelector.js';
 import HeaderNav from './components/HeaderNav.vue';

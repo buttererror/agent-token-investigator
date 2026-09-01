@@ -9,8 +9,9 @@ import { compileSessionHandoff } from './handoffCompiler.js';
 import { lintPrompt } from './promptLinterEngine.js';
 import { runVerificationBenchmark } from './benchmarkEngine.js';
 import { logGuidanceChange, getGuidanceRecordsForProject, getTrackedProjects } from './guidanceLogger.js';
-import { generateTurnIssueReport, generateRecommendationIssueReport, listTokenIssues, readTokenIssue, deleteTokenIssue } from './tokenIssueGenerator.js';
+import { generateTurnIssueReport, generateRecommendationIssueReport, listTokenIssues, readTokenIssue, deleteTokenIssue, saveTokenIssue } from './tokenIssueGenerator.js';
 import { addCustomProject, removeCustomProject, browseDirectory, inspectDirectory } from './customProjects.js';
+
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -323,6 +324,19 @@ app.delete('/api/token-issues', (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+app.post('/api/token-issues/save', (req, res) => {
+  try {
+    const { projectPath = process.cwd(), fileName, content } = req.body;
+    if (!fileName) return res.status(400).json({ error: 'fileName is required' });
+    if (content === undefined) return res.status(400).json({ error: 'content is required' });
+    const success = saveTokenIssue(projectPath, fileName, content);
+    res.json({ success });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 // 12. Educational Glossary
 app.get('/api/glossary', (req, res) => {
