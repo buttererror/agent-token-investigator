@@ -69,8 +69,8 @@ function toggleRefresh() {
         :pacing-forecast="pacingForecast"
       />
 
-      <!-- Top Summary Metrics Cards -->
-      <MetricsOverview :overview="overview" />
+      <!-- Top Summary Metrics Cards with Inline Time Filters -->
+      <MetricsOverview :overview="overview" :sessions="sessions" />
 
       <!-- Interactive Analytics & Burn Charts -->
       <TokenBurnChart :overview="overview" :sessions="sessions" />
