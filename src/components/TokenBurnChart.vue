@@ -13,12 +13,36 @@ const props = defineProps({
   }
 });
 
-// Calculate composition percentages
+// Non-overlapping token quantities:
+// 1. Cached Input: props.overview.totalCached
+// 2. Fresh Input: props.overview.totalInput - props.overview.totalCached
+// 3. Reasoning Output: props.overview.totalReasoning
+// 4. Standard Output Text: Math.max(props.overview.totalOutput - props.overview.totalReasoning, 0)
 const total = computed(() => props.overview?.totalTokens || 1);
-const inputPct = computed(() => Math.round(((props.overview?.totalInput || 0) / total.value) * 100));
-const cachedPct = computed(() => Math.round(((props.overview?.totalCached || 0) / total.value) * 100));
-const reasoningPct = computed(() => Math.round(((props.overview?.totalReasoning || 0) / total.value) * 100));
-const outputPct = computed(() => Math.max(100 - (inputPct.value + reasoningPct.value), 1));
+const cachedTokens = computed(() => props.overview?.totalCached || 0);
+const freshTokens = computed(() => Math.max((props.overview?.totalInput || 0) - cachedTokens.value, 0));
+const reasoningTokens = computed(() => props.overview?.totalReasoning || 0);
+const standardOutputTokens = computed(() => Math.max((props.overview?.totalOutput || 0) - reasoningTokens.value, 0));
+
+// Exact percentage formatters (showing decimals for precision)
+function formatPct(val) {
+  const pct = (val / total.value) * 100;
+  if (pct === 0) return '0%';
+  if (pct < 0.1) return `${pct.toFixed(2)}%`;
+  if (pct < 1) return `${pct.toFixed(1)}%`;
+  return `${Math.round(pct)}%`;
+}
+
+const cachedPctNum = computed(() => (cachedTokens.value / total.value) * 100);
+const freshPctNum = computed(() => (freshTokens.value / total.value) * 100);
+const reasoningPctNum = computed(() => (reasoningTokens.value / total.value) * 100);
+const outputPctNum = computed(() => (standardOutputTokens.value / total.value) * 100);
+
+// Reasoning ratio against total generated output
+const reasoningShareOfOutput = computed(() => {
+  const totalOut = props.overview?.totalOutput || 1;
+  return Math.round((reasoningTokens.value / totalOut) * 100);
+});
 
 // Group sessions by day for timeline chart
 const dailyUsage = computed(() => {
@@ -49,49 +73,75 @@ const dailyUsage = computed(() => {
           <h4>Token Composition Breakdown</h4>
           <Tooltip 
             title="Token Type Distribution" 
-            text="Visual breakdown of how your tokens are split between Cached Prompt Input, Fresh Input, Model Reasoning, and Generated Output." 
-            why-it-matters="A high Cached Input bar indicates strong prompt caching and progressive disclosure."
+            text="Visual breakdown of how your tokens are split between Cached Prompt Input, Fresh Input, Model Reasoning (Thinking), and Standard Output." 
+            why-it-matters="A high Cached Input percentage means OpenAI cache is giving you an 80% discount on prompt input."
           />
         </div>
         <span class="mono text-muted text-xs">All Recorded Sessions</span>
       </div>
 
+      <!-- Segmented Track (with min-width for small slices so Reasoning is always clearly visible) -->
       <div class="composition-bar-track">
-        <div class="comp-slice slice-cached" :style="{ width: `${cachedPct}%` }" title="Cached Input"></div>
-        <div class="comp-slice slice-fresh" :style="{ width: `${Math.max(inputPct - cachedPct, 0)}%` }" title="Fresh Input"></div>
-        <div class="comp-slice slice-reasoning" :style="{ width: `${reasoningPct}%` }" title="Reasoning Tokens"></div>
-        <div class="comp-slice slice-output" :style="{ width: `${outputPct}%` }" title="Output Tokens"></div>
+        <div 
+          class="comp-slice slice-cached" 
+          :style="{ width: `${cachedPctNum}%` }" 
+          :title="`Cached Input: ${cachedTokens.toLocaleString()} (${formatPct(cachedTokens)})`"
+        ></div>
+        <div 
+          class="comp-slice slice-fresh" 
+          :style="{ width: `${freshPctNum}%` }" 
+          :title="`Fresh Input: ${freshTokens.toLocaleString()} (${formatPct(freshTokens)})`"
+        ></div>
+        <div 
+          v-if="reasoningTokens > 0"
+          class="comp-slice slice-reasoning" 
+          :style="{ width: `${Math.max(reasoningPctNum, 1.5)}%`, minWidth: '8px' }" 
+          :title="`Reasoning Tokens: ${reasoningTokens.toLocaleString()} (${formatPct(reasoningTokens)})`"
+        ></div>
+        <div 
+          class="comp-slice slice-output" 
+          :style="{ width: `${Math.max(outputPctNum, 1.5)}%`, minWidth: '8px' }" 
+          :title="`Output Code/Text: ${standardOutputTokens.toLocaleString()} (${formatPct(standardOutputTokens)})`"
+        ></div>
       </div>
 
       <div class="legend-grid">
         <div class="legend-item">
           <span class="legend-dot dot-cached"></span>
           <div class="legend-texts">
-            <span class="legend-label">Cached Input</span>
-            <span class="legend-val mono">{{ (overview?.totalCached || 0).toLocaleString() }} ({{ cachedPct }}%)</span>
+            <span class="legend-label">Cached Input (80% Off)</span>
+            <span class="legend-val mono text-green">{{ cachedTokens.toLocaleString() }} ({{ formatPct(cachedTokens) }})</span>
           </div>
         </div>
+
         <div class="legend-item">
           <span class="legend-dot dot-fresh"></span>
           <div class="legend-texts">
-            <span class="legend-label">Fresh Input</span>
-            <span class="legend-val mono">{{ Math.max((overview?.totalInput || 0) - (overview?.totalCached || 0), 0).toLocaleString() }}</span>
+            <span class="legend-label">Fresh Uncached Input</span>
+            <span class="legend-val mono text-blue">{{ freshTokens.toLocaleString() }} ({{ formatPct(freshTokens) }})</span>
           </div>
         </div>
+
         <div class="legend-item">
           <span class="legend-dot dot-reasoning"></span>
           <div class="legend-texts">
-            <span class="legend-label">Reasoning Tokens</span>
-            <span class="legend-val mono">{{ (overview?.totalReasoning || 0).toLocaleString() }} ({{ reasoningPct }}%)</span>
+            <span class="legend-label">Reasoning Tokens (Thinking)</span>
+            <span class="legend-val mono text-purple">{{ reasoningTokens.toLocaleString() }} ({{ formatPct(reasoningTokens) }})</span>
           </div>
         </div>
+
         <div class="legend-item">
           <span class="legend-dot dot-output"></span>
           <div class="legend-texts">
-            <span class="legend-label">Output Code/Text</span>
-            <span class="legend-val mono">{{ (overview?.totalOutput || 0).toLocaleString() }}</span>
+            <span class="legend-label">Generated Code & Output</span>
+            <span class="legend-val mono text-yellow">{{ standardOutputTokens.toLocaleString() }} ({{ formatPct(standardOutputTokens) }})</span>
           </div>
         </div>
+      </div>
+
+      <!-- Quick Reasoning Share Callout -->
+      <div class="reasoning-share-bar">
+        <span>🧠 <strong>Reasoning Effort Share:</strong> Reasoning accounts for <strong>{{ reasoningShareOfOutput }}%</strong> of all generated model output ({{ reasoningTokens.toLocaleString() }} of {{ (overview?.totalOutput || 0).toLocaleString() }} tokens).</span>
       </div>
     </div>
 
@@ -155,12 +205,12 @@ const dailyUsage = computed(() => {
 .text-xs { font-size: 0.75rem; }
 
 .composition-bar-track {
-  height: 20px;
+  height: 22px;
   background-color: var(--bg-input);
   border-radius: 9999px;
   overflow: hidden;
   display: flex;
-  margin-bottom: 18px;
+  margin-bottom: 16px;
   border: 1px solid var(--border-color);
 }
 
@@ -178,6 +228,7 @@ const dailyUsage = computed(() => {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
+  margin-bottom: 14px;
 }
 
 .legend-item {
@@ -203,13 +254,22 @@ const dailyUsage = computed(() => {
 }
 
 .legend-label {
-  font-size: 0.75rem;
+  font-size: 0.73rem;
   color: var(--text-dim);
 }
 
 .legend-val {
   font-size: 0.8rem;
   font-weight: 600;
+}
+
+.reasoning-share-bar {
+  background-color: rgba(168, 85, 247, 0.08);
+  border: 1px solid rgba(168, 85, 247, 0.2);
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  color: var(--text-main);
 }
 
 /* Timeline bars */
@@ -259,4 +319,9 @@ const dailyUsage = computed(() => {
   font-size: 0.68rem;
   color: var(--text-dim);
 }
+
+.text-green { color: var(--accent-green); }
+.text-blue { color: var(--accent-blue); }
+.text-purple { color: var(--accent-purple); }
+.text-yellow { color: var(--accent-yellow); }
 </style>
