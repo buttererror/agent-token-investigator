@@ -116,6 +116,59 @@ function getTurnEfficiency(turn) {
   };
 }
 
+function getTurnImprovementSuggestion(turn) {
+  if (!turn.tokenUsage) {
+    return {
+      type: 'optimal',
+      tip: '🟢 Optimal turn execution! No heavy token footprint or waste detected.'
+    };
+  }
+
+  const inp = turn.tokenUsage.input_tokens || 0;
+  const cached = turn.tokenUsage.cached_input_tokens || 0;
+  const out = turn.tokenUsage.output_tokens || 0;
+  const think = turn.tokenUsage.reasoning_output_tokens || 0;
+  const fresh = Math.max(inp - cached, 0);
+  const toolCount = turn.toolCalls?.length || 0;
+  const cachePct = inp > 0 ? Math.round((cached / inp) * 100) : 0;
+
+  const suggestions = [];
+
+  // 1. Dense tool sequence
+  if (toolCount >= 6) {
+    suggestions.push(`Executed ${toolCount} tool commands in one turn. Split multi-step workflows into smaller atomic turns or package into a reusable skill.`);
+  }
+
+  // 2. High fresh input
+  if (fresh > 30000) {
+    suggestions.push(`Introduced ${fresh.toLocaleString()} un-cached tokens. Use targeted line ranges (StartLine/EndLine) and grep searches instead of full file reads.`);
+  } else if (cachePct < 70 && inp > 25000) {
+    suggestions.push(`Cache hit was only ${cachePct}%. Keep system instructions in AGENTS.md rather than editing prompt headers to preserve prefix caching.`);
+  }
+
+  // 3. Large model output
+  if (out > 3000) {
+    suggestions.push(`Generated ${out.toLocaleString()} output tokens. Prompt for concise diffs or focused function changes rather than full file replacements.`);
+  }
+
+  // 4. High reasoning effort on light tasks
+  if (think > 1200 && toolCount <= 2) {
+    suggestions.push(`Deliberated with ${think.toLocaleString()} reasoning tokens. For routine tasks, set "reasoning_effort: low" to save quota.`);
+  }
+
+  if (suggestions.length === 0) {
+    return {
+      type: 'optimal',
+      tip: '🟢 Highly efficient turn! Reused 90%+ cached context with compact tool outputs. No improvements needed.'
+    };
+  }
+
+  return {
+    type: 'actionable',
+    tip: suggestions.join(' • ')
+  };
+}
+
 function formatToolArg(input) {
   if (!input) return '';
   if (typeof input === 'string') return input.substring(0, 80);
@@ -317,6 +370,12 @@ function formatToolArg(input) {
           <!-- Turn Efficiency Diagnosis -->
           <div class="turn-diagnosis-text text-dim">
             <span>⚡ <strong>Turn Footprint:</strong> {{ getTurnEfficiency(turn).summary }}</span>
+          </div>
+
+          <!-- Per-Turn Improvement Suggestion -->
+          <div :class="['turn-suggestion-box', `sug-${getTurnImprovementSuggestion(turn).type}`]">
+            <span class="sug-icon">💡</span>
+            <span class="sug-text"><strong>Improvement Suggestion:</strong> {{ getTurnImprovementSuggestion(turn).tip }}</span>
           </div>
 
           <!-- Noise Spikes Alert (if any) -->
@@ -658,10 +717,37 @@ function formatToolArg(input) {
 
 .turn-diagnosis-text {
   font-size: 0.75rem;
-  margin-bottom: 10px;
+  margin-bottom: 6px;
   padding: 4px 8px;
   background-color: rgba(0,0,0,0.2);
   border-radius: 6px;
+}
+
+.turn-suggestion-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.76rem;
+  margin-bottom: 10px;
+  line-height: 1.4;
+}
+
+.sug-optimal {
+  background-color: rgba(34, 197, 94, 0.08);
+  border: 1px solid rgba(34, 197, 94, 0.2);
+  color: var(--accent-green);
+}
+
+.sug-actionable {
+  background-color: rgba(234, 179, 8, 0.08);
+  border: 1px solid rgba(234, 179, 8, 0.25);
+  color: #fef08a;
+}
+
+.sug-icon {
+  font-size: 0.85rem;
 }
 
 .sep {
