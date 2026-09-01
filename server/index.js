@@ -9,6 +9,7 @@ import { compileSessionHandoff } from './handoffCompiler.js';
 import { lintPrompt } from './promptLinterEngine.js';
 import { runVerificationBenchmark } from './benchmarkEngine.js';
 import { logGuidanceChange, getGuidanceRecordsForProject, getTrackedProjects } from './guidanceLogger.js';
+import { generateTurnIssueReport, listTokenIssues } from './tokenIssueGenerator.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -208,6 +209,30 @@ app.post('/api/undo-action', (req, res) => {
     const { backupId } = req.body;
     const result = undoAction(backupId);
     res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 14. Token Consumption Issues Generator API
+app.post('/api/generate-turn-issue', (req, res) => {
+  try {
+    const { projectPath, session, turn } = req.body;
+    if (!session || !turn) {
+      return res.status(400).json({ error: 'session and turn are required to generate issue report' });
+    }
+    const result = generateTurnIssueReport({ projectPath, session, turn });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/token-issues', (req, res) => {
+  try {
+    const { projectPath = '/home/ellol/apps/agent-token-tracker' } = req.query;
+    const issues = listTokenIssues(projectPath);
+    res.json(issues);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

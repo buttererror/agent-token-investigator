@@ -11,11 +11,11 @@ function normalizeDir(p) {
 }
 
 /**
- * Ensures the target issue directory exists
+ * Ensures the target issue directory exists inside the tracked project
  */
 export function getIssueDirectory(projectPath) {
   const root = normalizeDir(projectPath);
-  const dir = path.join(root, 'docs', 'token-consumption', 'issues');
+  const dir = path.join(root, 'docs', 'tokens-consumptions', 'issues');
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
@@ -88,11 +88,11 @@ export function generateTurnIssueReport({ projectPath, session, turn }) {
     goodExample = 'Packaging the multi-step verification sequence into a modular `.agents/skills/` preset.';
   }
 
-  const markdownContent = `# Token Inefficiency Issue: Turn #${turnNum} in Session \`${sessionShort}\`
+  const markdownContent = `# Token Inefficiency Issue: Turn #${turnNum} in Session \\\`${sessionShort}\\\`
 
-> **Issue ID**: \`ISSUE-TURN-${turnNum}-${sessionShort}\`  
-> **Status**: \`OPEN / ACTIONABLE\`  
-> **Target Workspace**: \`${normalizeDir(projectPath)}\`  
+> **Issue ID**: \\\`ISSUE-TURN-${turnNum}-${sessionShort}\\\`  
+> **Status**: \\\`OPEN / ACTIONABLE\\\`  
+> **Target Workspace**: \\\`${normalizeDir(projectPath)}\\\`  
 > **Generated Date**: ${new Date().toISOString().split('T')[0]}  
 
 ---
@@ -101,10 +101,10 @@ export function generateTurnIssueReport({ projectPath, session, turn }) {
 
 | Attribute | Value |
 | :--- | :--- |
-| **Session ID** | [\`${sessionId}\`](file://${session?.filePath || ''}) |
+| **Session ID** | [\\\`${sessionId}\\\`](file://${session?.filePath || ''}) |
 | **Thread Name** | **${session?.threadName || 'Untitled Session'}** |
 | **Turn Number** | **Turn #${turnNum}** |
-| **Timestamp** | \`${turn.startedAt || new Date().toISOString()}\` |
+| **Timestamp** | \\\`${turn.startedAt || new Date().toISOString()}\\\` |
 | **Total Turn Tokens** | **${total.toLocaleString()} tokens** |
 | **Fresh Uncached Input** | **${fresh.toLocaleString()} tokens** |
 | **Cached Input Tokens** | **${cached.toLocaleString()} tokens (${cacheHitRate}% hit rate)** |
@@ -119,7 +119,7 @@ export function generateTurnIssueReport({ projectPath, session, turn }) {
 ${problemDetails}
 
 ### 🔍 User Request in this Turn:
-> *${turn.userPrompt ? turn.userPrompt.replace(/\n/g, ' ') : 'No user prompt recorded.'}*
+> *${turn.userPrompt ? String(turn.userPrompt).replace(/\n/g, ' ') : 'No user prompt recorded.'}*
 
 ### 🔧 Tool Invocations Observed (${turn.toolCalls?.length || 0}):
 ${formatToolSummary(turn.toolCalls)}
@@ -138,12 +138,12 @@ ${formatToolSummary(turn.toolCalls)}
 
 When an AI agent picks up this issue, execute the following optimization steps:
 
-1. **Enforce Progressive Disclosure in `AGENTS.md`**:
-   - Instruct agents to search for symbols first using \`grep_search\` or \`find_by_name\` before viewing files.
-   - Always supply \`StartLine\` and \`EndLine\` when using \`view_file\`.
+1. **Enforce Progressive Disclosure in AGENTS.md**:
+   - Instruct agents to search for symbols first using grep_search or find_by_name before viewing files.
+   - Always supply StartLine and EndLine when viewing files.
 
 2. **Configure Lean Verification Scripts**:
-   - Add a dedicated silent test runner script with \`--bail 1\` and \`--silent\` flags in \`package.json\`.
+   - Add a dedicated silent test runner script with --bail 1 and --silent flags in package.json.
 
 3. **Bound Conversation Turns**:
    - When turn count exceeds 15 turns or fresh input exceeds 25,000 tokens, compile a structured session handoff prompt and initiate a clean thread.
@@ -162,7 +162,7 @@ ${goodExample}
 
 ## 6. Quick Automated Resolution
 
-To resolve this token consumption issue, apply the matching action from the **Guided Optimizer** or inject the following rule into [\`AGENTS.md\`](AGENTS.md):
+To resolve this token consumption issue, apply the matching action from the **Guided Optimizer** or inject the following rule into [AGENTS.md](AGENTS.md):
 
 \`\`\`markdown
 ## Token Optimization Rules
@@ -179,17 +179,17 @@ To resolve this token consumption issue, apply the matching action from the **Gu
     actionType: 'GENERATE_TOKEN_ISSUE',
     what: `Generated token issue report for Turn #${turnNum} (${fileName})`,
     why: `Turn #${turnNum} in session ${sessionShort} consumed ${inp.toLocaleString()} tokens with ${fresh.toLocaleString()} fresh un-cached payload.`,
-    how: `Created structured diagnostic report in docs/token-consumption/issues/${fileName}`,
+    how: `Created structured diagnostic report in docs/tokens-consumptions/issues/${fileName}`,
     targetFile: filePath,
     author: `Token Diagnostic Engine (Turn #${turnNum})`,
-    diff: `+ docs/token-consumption/issues/${fileName}`
+    diff: `+ docs/tokens-consumptions/issues/${fileName}`
   });
 
   return {
     success: true,
     fileName,
     filePath,
-    relativePath: path.join('docs', 'token-consumption', 'issues', fileName),
+    relativePath: path.join('docs', 'tokens-consumptions', 'issues', fileName),
     content: markdownContent,
     guidanceRecord: record,
     savings: projectedSavingsTokens
@@ -210,7 +210,7 @@ export function listTokenIssues(projectPath) {
     return {
       fileName: file,
       filePath: fullPath,
-      relativePath: path.join('docs', 'token-consumption', 'issues', file),
+      relativePath: path.join('docs', 'tokens-consumptions', 'issues', file),
       size: stat.size,
       updatedAt: stat.mtime.toISOString()
     };

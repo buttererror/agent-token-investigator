@@ -220,6 +220,58 @@ async function saveTurnNote(turn) {
   }
 }
 
+const generatedIssues = ref({});
+const isGeneratingAllIssues = ref(false);
+const allIssuesGeneratedMessage = ref('');
+
+async function handleGenerateTurnIssue(turn) {
+  generatedIssues.value[turn.turnNumber] = { status: 'generating' };
+  try {
+    const res = await fetch('/api/generate-turn-issue', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        projectPath: props.activeWorkspace,
+        session: props.session,
+        turn
+      })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      generatedIssues.value[turn.turnNumber] = {
+        status: 'success',
+        fileName: data.fileName,
+        relativePath: data.relativePath,
+        savings: data.savings
+      };
+      emit('guidance-updated');
+    } else {
+      generatedIssues.value[turn.turnNumber] = { status: 'error' };
+    }
+  } catch (e) {
+    generatedIssues.value[turn.turnNumber] = { status: 'error' };
+  }
+}
+
+async function handleGenerateAllIssues() {
+  isGeneratingAllIssues.value = true;
+  try {
+    const turnsToGenerate = (props.session?.turns || []).filter(t => 
+      (t.noiseSpikes?.length > 0) || 
+      ((t.tokenUsage?.input_tokens - t.tokenUsage?.cached_input_tokens) > 15000) ||
+      (t.toolCalls?.length >= 3)
+    );
+
+    for (const turn of turnsToGenerate) {
+      await handleGenerateTurnIssue(turn);
+    }
+    allIssuesGeneratedMessage.value = `Generated ${turnsToGenerate.length} issue report(s) in docs/token-consumption/issues/`;
+    setTimeout(() => { allIssuesGeneratedMessage.value = ''; }, 4000);
+  } finally {
+    isGeneratingAllIssues.value = false;
+  }
+}
+
 const sessionVerdict = computed(() => {
   const turns = props.session?.turnCount || 0;
   const rate = cacheRate.value;
@@ -392,6 +444,14 @@ function formatToolArg(input) {
           <span class="session-path mono text-dim text-xs">{{ session?.meta?.cwd || '' }} • {{ session?.sessionId }}</span>
         </div>
         <div class="head-actions">
+          <button 
+            class="btn btn-secondary btn-sm"
+            :disabled="isGeneratingAllIssues"
+            @click="handleGenerateAllIssues"
+            title="Generate structured issue reports in docs/token-consumption/issues/ for all heavy turns"
+          >
+            <span>📑</span> {{ isGeneratingAllIssues ? 'Generating Issues...' : 'Generate docs/ Issues' }}
+          </button>
           <button 
             class="btn btn-primary btn-sm"
             @click="$emit('export-handoff', session)"
@@ -649,6 +709,29 @@ function formatToolArg(input) {
                   >
                     ↩️ Undo
                   </button>
+                </div>
+              </div>
+
+              <!-- Action: Generate Structured Issue in docs/token-consumption/issues/ -->
+              <div class="turn-action-row">
+                <button
+                  :disabled="generatedIssues[turn.turnNumber]?.status === 'generating'"
+                  :class="['btn-turn-action', { 'is-applied': generatedIssues[turn.turnNumber]?.status === 'success' }]"
+                  @click="handleGenerateTurnIssue(turn)"
+                  title="Generate a structured markdown issue report inside docs/token-consumption/issues/ with context and examples for an AI agent"
+                >
+                  <span class="btn-action-badge">Docs Issue</span>
+                  <span class="btn-action-text">📄 Generate Issue Report in docs/</span>
+                  <span v-if="generatedIssues[turn.turnNumber]?.status === 'generating'" class="spinner-inline">⏳ Writing .md...</span>
+                  <span v-else-if="generatedIssues[turn.turnNumber]?.status === 'success'" class="text-green">✅ Saved Issue</span>
+                </button>
+
+                <!-- Feedback for generated issue -->
+                <div v-if="generatedIssues[turn.turnNumber]?.status === 'success'" class="action-feedback-pill">
+                  <span class="feedback-text text-green">
+                    📄 {{ generatedIssues[turn.turnNumber].relativePath }}
+                    <span v-if="generatedIssues[turn.turnNumber].savings" class="text-dim"> (~{{ generatedIssues[turn.turnNumber].savings.toLocaleString() }} tokens savings)</span>
+                  </span>
                 </div>
               </div>
             </div>
