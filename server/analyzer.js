@@ -140,7 +140,7 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
   } else if (scope === 'date' && date) {
     targetSessions = sessions.filter(s => (s.updatedAt || s.meta?.timestamp || '').startsWith(date));
     scopeLabel = `Specific Date (${date})`;
-  } else if (scope === '5hour') {
+  } else if (scope === '5hour' || scope === '5h') {
     const selectedDate = date || new Date().toISOString().split('T')[0];
     
     if (startHour !== undefined && startHour !== null && startHour !== 'latest' && startHour !== '') {
@@ -170,7 +170,24 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
       });
       scopeLabel = date ? `Latest 5-Hour Window on ${date}` : `Latest 5-Hour Rate-Limit Window`;
     }
-  } else if (scope === 'weekly') {
+  } else if (scope === 'today') {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const startMs = todayStart.getTime();
+    targetSessions = sessions.filter(s => {
+      const sTime = new Date(s.updatedAt || s.meta?.timestamp || 0).getTime();
+      return sTime >= startMs;
+    });
+    scopeLabel = 'Today';
+  } else if (scope === '24h') {
+    const baseTime = sessions[0]?.updatedAt ? new Date(sessions[0].updatedAt).getTime() : Date.now();
+    const oneDayAgo = baseTime - (24 * 60 * 60 * 1000);
+    targetSessions = sessions.filter(s => {
+      const sTime = new Date(s.updatedAt || s.meta?.timestamp || 0).getTime();
+      return sTime >= oneDayAgo && sTime <= baseTime;
+    });
+    scopeLabel = 'Last 24 Hours';
+  } else if (scope === 'weekly' || scope === '7d') {
     const baseTime = date 
       ? new Date(date + 'T23:59:59Z').getTime() 
       : (sessions[0]?.updatedAt ? new Date(sessions[0].updatedAt).getTime() : Date.now());
@@ -179,7 +196,15 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
       const sTime = new Date(s.updatedAt || s.meta?.timestamp || 0).getTime();
       return sTime >= sevenDaysAgo && sTime <= baseTime;
     });
-    scopeLabel = date ? `7-Day Window ending ${date}` : `Rolling 7-Day Window`;
+    scopeLabel = date ? `7-Day Window ending ${date}` : `Last 7 Days`;
+  } else if (scope === '30d') {
+    const baseTime = sessions[0]?.updatedAt ? new Date(sessions[0].updatedAt).getTime() : Date.now();
+    const thirtyDaysAgo = baseTime - (30 * 24 * 60 * 60 * 1000);
+    targetSessions = sessions.filter(s => {
+      const sTime = new Date(s.updatedAt || s.meta?.timestamp || 0).getTime();
+      return sTime >= thirtyDaysAgo && sTime <= baseTime;
+    });
+    scopeLabel = 'Last 30 Days';
   }
 
   // Calculate tokens in filtered window
@@ -258,8 +283,10 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
       id: 'diag-test-noise',
       category: 'PAYLOAD_NOISE',
       severity: 'HIGH',
-      title: 'Unfiltered Test Suite Console Noise',
-      headline: `Detected ${noisyTestTurns} test command(s) without both --bail 1 and --silent within ${scopeLabel}.`,
+      title: 'Reduce noisy test output',
+      headline: `Verbose test output is inflating input tokens without adding value. (${noisyTestTurns} test command(s) without --bail 1 and --silent within ${scopeLabel})`,
+      affectedCount: noisyTestTurns,
+      affectedUnit: 'test commands affected',
       measuredImpact: measuredImpact(
         'Input context in affected turns',
         testAffectedInputTokens,
@@ -307,8 +334,10 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
       id: 'diag-file-reads',
       category: 'CONTEXT_BLOAT',
       severity: 'MEDIUM',
-      title: 'Unbounded File Read Requests',
+      title: 'Limit unbounded file reads',
       headline: `Detected ${noisyFileTurns} file read request(s) without line-range metadata in ${scopeLabel}.`,
+      affectedCount: noisyFileTurns,
+      affectedUnit: 'unbounded file reads',
       measuredImpact: measuredImpact(
         'Input context in affected turns',
         fileAffectedInputTokens,
@@ -355,8 +384,10 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
       id: 'diag-session-fatigue',
       category: 'SESSION_FATIGUE',
       severity: 'HIGH',
-      title: 'Context Fatigue & Long Thread Carryover',
+      title: 'Compact long-running thread context',
       headline: `${bloatedSessionsCount} session(s) exceeded 12+ turns carrying over heavy prompt history in ${scopeLabel}.`,
+      affectedCount: bloatedSessionsCount,
+      affectedUnit: 'long thread sessions',
       measuredImpact: measuredImpact(
         'Input context after turn 12',
         lateTurnInputTokens,
@@ -403,8 +434,10 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
     id: 'diag-reasoning-roi',
     category: 'MODEL_RIGHT_SIZING',
     severity: 'LOW',
-    title: 'Reasoning Effort & Task Right-Sizing',
+    title: 'Right-size reasoning effort for routine tasks',
     headline: `Detected ${routineHighReasoningTurns} likely routine turn(s) with high reasoning-token use in ${scopeLabel}.`,
+    affectedCount: routineHighReasoningTurns,
+    affectedUnit: 'routine turns affected',
     measuredImpact: measuredImpact(
       'Reasoning tokens in likely routine turns',
       routineHighReasoningTokens,

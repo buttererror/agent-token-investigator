@@ -1,13 +1,11 @@
 <script setup>
-import { ref, onMounted  } from 'vue';
+import { ref, onMounted } from 'vue';
 import { useTokenData } from './composables/useTokenData.js';
 import { useActionSelector } from './composables/useActionSelector.js';
-import HeaderNav from './components/HeaderNav.vue';
-import RateLimitMeter from './components/RateLimitMeter.vue';
-import MetricsOverview from './components/MetricsOverview.vue';
-import TokenBurnChart from './components/TokenBurnChart.vue';
-import GuidedOptimizer from './components/GuidedOptimizer.vue';
-import SessionList from './components/SessionList.vue';
+import AppHeader from './components/dashboard/AppHeader.vue';
+import OverviewView from './views/OverviewView.vue';
+import SessionsView from './views/SessionsView.vue';
+import AnalyticsView from './views/AnalyticsView.vue';
 import TurnInspectorModal from './components/TurnInspectorModal.vue';
 import GuideDrawer from './components/GuideDrawer.vue';
 import ActionPromptLinterModal from './components/ActionPromptLinterModal.vue';
@@ -24,6 +22,9 @@ const {
   filteredSessions,
   pacingForecast,
   filteredPacingForecast,
+  diagnostics,
+  topRecommendation,
+  attentionSessions,
   glossary,
   projects,
   guidanceRecords,
@@ -33,9 +34,13 @@ const {
   selectedSession,
   activeWorkspace,
   activeAgent,
+  activeTimeRange,
+  currentView,
   isAutoRefresh,
   setWorkspace,
   setAgent,
+  setTimeRange,
+  setCurrentView,
   fetchGuidanceRecords,
   addGuidanceRecord,
   refresh
@@ -43,7 +48,6 @@ const {
 
 const { undoLastAction } = useActionSelector();
 
-const activeTimeFilter = ref('all');
 const isGuideOpen = ref(false);
 const isLinterOpen = ref(false);
 const isHandoffOpen = ref(false);
@@ -87,6 +91,14 @@ function handleAgentChange(newAgent) {
   setAgent(newAgent);
 }
 
+function handleTimeRangeChange(newRange) {
+  setTimeRange(newRange);
+}
+
+function handleViewChange(newView) {
+  setCurrentView(newView);
+}
+
 async function handleAddGuidanceRecord(recordData) {
   await addGuidanceRecord(recordData);
   fetchIssuesCount(activeWorkspace.value);
@@ -105,77 +117,73 @@ onMounted(() => {
 
 <template>
   <div class="app-container">
-    <!-- Header Navigation with Project Selector & Guidance Log -->
-    <HeaderNav 
+    <!-- Header with Views, Scope Dropdowns, Live Sync & Tools Menu -->
+    <AppHeader 
+      :current-view="currentView"
       :active-workspace="activeWorkspace"
       :active-agent="activeAgent"
+      :active-time-range="activeTimeRange"
       :projects="projects"
       :records-count="guidanceRecords.length"
       :issues-count="issuesCount"
       :is-auto-refresh="isAutoRefresh"
+      @change-view="handleViewChange"
+      @change-workspace="handleWorkspaceChange"
+      @change-agent="handleAgentChange"
+      @change-time-range="handleTimeRangeChange"
       @toggle-refresh="toggleRefresh"
       @open-guide="isGuideOpen = true"
       @open-linter="isLinterOpen = true"
       @open-benchmark="isBenchmarkOpen = true"
       @open-guidance-records="isGuidanceRecordsOpen = true"
       @open-issues="isIssuesOpen = true"
-      @change-workspace="handleWorkspaceChange"
-      @change-agent="handleAgentChange"
     />
 
-    <!-- Main Content -->
+    <!-- Main Content Views -->
     <main v-if="!isLoading">
-      <!-- Action 7: Rate Limits & Quota Meter -->
-      <RateLimitMeter 
-        :rate-limits="pacingForecast?.rateLimits"
-        :pacing-forecast="pacingForecast"
-        :active-agent="activeAgent"
-        :active-workspace="activeWorkspace"
-        @issue-generated="() => fetchIssuesCount(activeWorkspace)"
-      />
-
-
-      <!-- Overview Metrics Grid -->
-      <MetricsOverview
+      <!-- 1. Overview View (Default) -->
+      <OverviewView 
+        v-if="currentView === 'overview'"
         :overview="filteredOverview"
         :sessions="filteredSessions"
-        :time-filter="activeTimeFilter"
-        @update-time-filter="activeTimeFilter = $event"
-      />
-
-      <!-- Token Burn Velocity Chart -->
-      <TokenBurnChart 
-        :overview="filteredOverview" 
-        :sessions="filteredSessions" 
-        :active-agent="activeAgent"
-        :active-workspace="activeWorkspace"
-        :time-filter="activeTimeFilter"
-      />
-
-
-      <!-- Guided Optimizer & What-If Action Selector -->
-      <GuidedOptimizer 
-        :all-sessions="filteredSessions"
+        :attention-sessions="attentionSessions"
+        :pacing-forecast="filteredPacingForecast"
+        :top-recommendation="topRecommendation"
         :active-workspace="activeWorkspace"
         :active-agent="activeAgent"
-        @open-handoff="isHandoffOpen = true"
-        @open-skill-gen="isSkillGenOpen = true"
-        @open-linter="isLinterOpen = true"
+        :active-time-range="activeTimeRange"
+        @inspect-session="handleInspect"
+        @view-all-sessions="currentView = 'sessions'"
         @issue-generated="() => fetchIssuesCount(activeWorkspace)"
       />
 
-
-      <!-- Actionable Session List & Turn Inspector -->
-      <SessionList 
-        :sessions="filteredSessions" 
+      <!-- 2. Sessions View -->
+      <SessionsView 
+        v-else-if="currentView === 'sessions'"
+        :sessions="filteredSessions"
         @inspect-session="handleInspect"
+      />
+
+      <!-- 3. Analytics View -->
+      <AnalyticsView 
+        v-else-if="currentView === 'analytics'"
+        :overview="filteredOverview"
+        :sessions="filteredSessions"
+        :active-agent="activeAgent"
+        :active-workspace="activeWorkspace"
+        :active-time-range="activeTimeRange"
+        @update-time-range="handleTimeRangeChange"
       />
     </main>
 
-    <!-- Loading State -->
-    <div v-else class="loading-screen">
-      <div class="spinner"></div>
-      <p>Parsing agent telemetry & analyzing token consumption...</p>
+    <!-- Skeleton Loading State -->
+    <div v-else class="skeleton-view">
+      <div class="skeleton-grid-2">
+        <div class="skeleton-box h-140"></div>
+        <div class="skeleton-box h-140"></div>
+      </div>
+      <div class="skeleton-box h-160"></div>
+      <div class="skeleton-box h-200"></div>
     </div>
 
     <!-- Modals & Drawers -->
@@ -240,26 +248,39 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.loading-screen {
+.skeleton-view {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-height: 400px;
-  gap: 16px;
-  color: var(--text-muted);
+  gap: 24px;
 }
 
-.spinner {
-  width: 40px;
-  height: 40px;
-  border: 3px solid rgba(56, 189, 248, 0.2);
-  border-top-color: var(--accent-blue);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+.skeleton-grid-2 {
+  display: grid;
+  grid-template-columns: 2fr 3fr;
+  gap: 24px;
 }
 
-@keyframes spin {
-  to { transform: rotate(360deg); }
+.skeleton-box {
+  background: var(--dashboard-surface);
+  border: 1px solid var(--dashboard-border);
+  border-radius: var(--dashboard-radius);
+  animation: pulse-skeleton 1.5s infinite ease-in-out;
+}
+
+.h-140 { height: 140px; }
+.h-160 { height: 160px; }
+.h-200 { height: 220px; }
+
+@keyframes pulse-skeleton {
+  0% { opacity: 0.6; }
+  50% { opacity: 0.25; }
+  100% { opacity: 0.6; }
+}
+
+@media (max-width: 1024px) {
+  .skeleton-grid-2 {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
+

@@ -1,21 +1,35 @@
 :root {
-  --bg-main: #0b0f19;
-  --bg-card: #131b2e;
-  --bg-card-hover: #1a243d;
+  --dashboard-bg: #07101d;
+  --dashboard-surface: #0b1626;
+  --dashboard-surface-raised: #101d30;
+  --dashboard-border: #2a3a50;
+  --dashboard-text: #f8fafc;
+  --dashboard-text-muted: #9aa8bb;
+  --dashboard-text-dim: #64748b;
+  --dashboard-cyan: #2dcaf5;
+  --dashboard-green: #60e56f;
+  --dashboard-amber: #f5b301;
+  --dashboard-red: #fb7185;
+  --dashboard-radius: 10px;
+  --dashboard-focus: 0 0 0 3px rgba(45, 202, 245, 0.32);
+
+  --bg-main: var(--dashboard-bg);
+  --bg-card: var(--dashboard-surface);
+  --bg-card-hover: var(--dashboard-surface-raised);
   --bg-input: #0e1424;
-  --border-color: #1e293b;
-  --border-focus: #3b82f6;
-  --text-main: #f8fafc;
-  --text-muted: #94a3b8;
-  --text-dim: #64748b;
-  --accent-blue: #38bdf8;
+  --border-color: var(--dashboard-border);
+  --border-focus: var(--dashboard-cyan);
+  --text-main: var(--dashboard-text);
+  --text-muted: var(--dashboard-text-muted);
+  --text-dim: var(--dashboard-text-dim);
+  --accent-blue: var(--dashboard-cyan);
   --accent-purple: #a855f7;
-  --accent-green: #22c55e;
-  --accent-yellow: #eab308;
-  --accent-red: #ef4444;
-  --accent-gradient: linear-gradient(135deg, #38bdf8 0%, #818cf8 50%, #c084fc 100%);
+  --accent-green: var(--dashboard-green);
+  --accent-yellow: var(--dashboard-amber);
+  --accent-red: var(--dashboard-red);
+  --accent-gradient: linear-gradient(135deg, #2dcaf5 0%, #38bdf8 50%, #818cf8 100%);
   --card-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
-  --glow-blue: 0 0 20px rgba(56, 189, 248, 0.2);
+  --glow-blue: 0 0 20px rgba(45, 202, 245, 0.2);
   --font-main: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
 }
@@ -26,20 +40,42 @@
   padding: 0;
 }
 
+html, body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
 body {
-  background-color: var(--bg-main);
-  color: var(--text-main);
+  background-color: var(--dashboard-bg);
+  color: var(--dashboard-text);
   font-family: var(--font-main);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   min-height: 100vh;
 }
 
+/* Accessible focus outline */
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+a:focus-visible,
+[tabindex]:focus-visible {
+  outline: none;
+  box-shadow: var(--dashboard-focus);
+}
+
 /* Container */
 .app-container {
   max-width: 1440px;
+  width: 100%;
   margin: 0 auto;
-  padding: 24px;
+  padding: 20px 24px;
+}
+
+@media (max-width: 768px) {
+  .app-container {
+    padding: 12px 14px;
+  }
 }
 
 /* Typography */

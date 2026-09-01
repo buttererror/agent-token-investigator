@@ -80,7 +80,8 @@ app.get('/api/sessions/:id', async (req, res) => {
 // 4. Guided diagnostics with What-If simulation and date/scope filtering
 app.get('/api/diagnostics', async (req, res) => {
   try {
-    const { scope = 'all', date, startHour, sessionId, agent, workspace, targetProjectPath = process.cwd() } = req.query;
+    const { date, startHour, sessionId, agent, workspace, targetProjectPath = process.cwd() } = req.query;
+    const scope = req.query.scope || req.query.timeRange || 'all';
     let sessions = await getAllSessions();
     if (agent && agent !== 'all') {
       sessions = sessions.filter(s => (s.agentType || 'codex') === agent);
@@ -453,14 +454,12 @@ app.get('/api/glossary', (req, res) => {
   ]);
 });
 
-// Serve frontend dist in production
+// Serve frontend dist
 const distPath = path.join(__dirname, '..', 'dist');
-if (fs.existsSync(distPath)) {
-  app.use(express.static(distPath));
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(distPath, 'index.html'));
-  });
-}
+app.use(express.static(distPath));
+app.get('*', (req, res) => {
+  res.sendFile(path.join(distPath, 'index.html'));
+});
 
 app.listen(PORT, () => {
   console.log(`⚡ Agent Token Tracker API running on http://localhost:${PORT}`);
