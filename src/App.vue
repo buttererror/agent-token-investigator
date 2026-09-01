@@ -2,7 +2,6 @@
 import { ref } from 'vue';
 import { useTokenData } from './composables/useTokenData.js';
 import HeaderNav from './components/HeaderNav.vue';
-import GlobalFilterBar from './components/GlobalFilterBar.vue';
 import RateLimitMeter from './components/RateLimitMeter.vue';
 import MetricsOverview from './components/MetricsOverview.vue';
 import TokenBurnChart from './components/TokenBurnChart.vue';
@@ -16,15 +15,8 @@ import ActionSkillGeneratorModal from './components/ActionSkillGeneratorModal.vu
 import BenchmarkModal from './components/BenchmarkModal.vue';
 
 const {
-  rawOverview,
-  rawSessions,
   overview,
   sessions,
-  diagnostics,
-  diagnosticScope,
-  activeScopeMode,
-  activeScopeDate,
-  activeScopeSessionId,
   pacingForecast,
   glossary,
   isLoading,
@@ -32,7 +24,6 @@ const {
   selectedSession,
   activeWorkspace,
   isAutoRefresh,
-  setScope,
   refresh
 } = useTokenData();
 
@@ -70,16 +61,6 @@ function toggleRefresh() {
       @open-benchmark="isBenchmarkOpen = true"
     />
 
-    <!-- Global State & Scope Filter Toolbar -->
-    <GlobalFilterBar 
-      :active-scope-mode="activeScopeMode"
-      :active-scope-date="activeScopeDate"
-      :active-scope-session-id="activeScopeSessionId"
-      :diagnostic-scope="diagnosticScope"
-      :all-sessions="rawSessions"
-      @change-scope="setScope"
-    />
-
     <!-- Main Content -->
     <main v-if="!isLoading">
       <!-- Action 7: Rate Limits & Quota Meter -->
@@ -94,13 +75,10 @@ function toggleRefresh() {
       <!-- Interactive Analytics & Burn Charts -->
       <TokenBurnChart :overview="overview" :sessions="sessions" />
 
-      <!-- Centerpiece: Guided Optimization Advisor (What-If Simulator & 7 Actions) -->
+      <!-- Centerpiece: Guided Optimization Advisor (Section-Scoped What-If Simulator & Actions) -->
       <GuidedOptimizer 
-        :diagnostics="diagnostics"
-        :diagnostic-scope="diagnosticScope"
         :all-sessions="sessions"
         :active-workspace="activeWorkspace"
-        @change-scope="setScope"
         @open-handoff="isHandoffOpen = true"
         @open-skill-gen="isSkillGenOpen = true"
         @open-linter="isLinterOpen = true"
@@ -176,7 +154,7 @@ function toggleRefresh() {
   border: 3px solid rgba(56, 189, 248, 0.2);
   border-top-color: var(--accent-blue);
   border-radius: 50%;
-  animation: spin 1s linear infinite;
+  animation: spin 0.8s linear infinite;
 }
 
 @keyframes spin {

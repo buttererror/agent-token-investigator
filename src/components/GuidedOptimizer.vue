@@ -1,17 +1,9 @@
 <script setup>
-import { ref, watch } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import Tooltip from './common/Tooltip.vue';
 import { useActionSelector } from '../composables/useActionSelector.js';
 
 const props = defineProps({
-  diagnostics: {
-    type: Array,
-    default: () => []
-  },
-  diagnosticScope: {
-    type: Object,
-    default: () => ({})
-  },
   allSessions: {
     type: Array,
     default: () => []
@@ -22,14 +14,24 @@ const props = defineProps({
   }
 });
 
-const emit = defineEmits(['open-handoff', 'open-skill-gen', 'open-linter', 'change-scope']);
+const emit = defineEmits(['open-handoff', 'open-skill-gen', 'open-linter']);
 
 const { isApplying, feedbackMessage, feedbackType, appliedBackups, applyAction, undoLastAction } = useActionSelector();
 
 const activeDiagnosticIndex = ref(0);
-const activeScopeMode = ref(props.diagnosticScope?.mode || 'all');
+const activeScopeMode = ref('all');
 const filterDate = ref(new Date().toISOString().split('T')[0]);
 const filterSessionId = ref('');
+const isDiagLoading = ref(false);
+
+const localDiagnostics = ref([]);
+const localScope = ref({
+  mode: 'all',
+  label: 'All Recorded History',
+  sessionCount: 0,
+  totalTokens: 0,
+  cacheHitRate: 0
+});
 
 // Diff Preview Modal state
 const diffModalAction = ref(null);
@@ -40,23 +42,50 @@ const customRuleText = ref('');
 const customScriptName = ref('');
 const customScriptCmd = ref('');
 
+async function fetchLocalDiagnostics(scope = activeScopeMode.value, date = filterDate.value, sessionId = filterSessionId.value) {
+  isDiagLoading.value = true;
+  try {
+    const params = new URLSearchParams({
+      scope,
+      targetProjectPath: props.activeWorkspace
+    });
+    if (date && (scope === 'date' || scope === '5hour' || scope === 'weekly')) {
+      params.set('date', date);
+    }
+    if (sessionId && scope === 'session') {
+      params.set('sessionId', sessionId);
+    }
+
+    const res = await fetch(`/api/diagnostics?${params.toString()}`);
+    if (res.ok) {
+      const data = await res.json();
+      localDiagnostics.value = data.diagnostics || [];
+      localScope.value = data.scope || { mode: scope, label: scope };
+    }
+  } catch (e) {
+    // fallback
+  } finally {
+    isDiagLoading.value = false;
+  }
+}
+
 function changeScopeMode(mode) {
   activeScopeMode.value = mode;
   activeDiagnosticIndex.value = 0;
-  emit('change-scope', mode, filterDate.value, filterSessionId.value);
+  fetchLocalDiagnostics(mode, filterDate.value, filterSessionId.value);
 }
 
 function onDateChange() {
   activeScopeMode.value = 'date';
   activeDiagnosticIndex.value = 0;
-  emit('change-scope', 'date', filterDate.value, '');
+  fetchLocalDiagnostics('date', filterDate.value, '');
 }
 
 function onSessionChange() {
   if (filterSessionId.value) {
     activeScopeMode.value = 'session';
     activeDiagnosticIndex.value = 0;
-    emit('change-scope', 'session', '', filterSessionId.value);
+    fetchLocalDiagnostics('session', '', filterSessionId.value);
   }
 }
 
@@ -103,7 +132,13 @@ async function confirmAndApply() {
 
   await applyAction(action, props.activeWorkspace, payload);
   editingAction.value = null;
+  // Refresh section diagnostics to update active rule badge
+  fetchLocalDiagnostics();
 }
+
+onMounted(() => {
+  fetchLocalDiagnostics('all');
+});
 </script>
 
 <template>
@@ -111,10 +146,10 @@ async function confirmAndApply() {
     <div class="opt-header">
       <div class="opt-title-group">
         <h3>🎯 Guided Optimization Advisor & What-If Simulator</h3>
-        <span class="opt-sub">AI-driven diagnostics paired with date-filtered What-If simulations</span>
+        <span class="opt-sub">AI-driven diagnostics paired with section-scoped date & window filters</span>
       </div>
 
-      <!-- Scope / Date Filter Controls -->
+      <!-- Scope / Date Filter Controls (Scoped specifically to this section) -->
       <div class="scope-filter-toolbar">
         <div class="scope-pills">
           <button 
@@ -150,7 +185,7 @@ async function confirmAndApply() {
         <div class="session-picker-wrap" v-if="allSessions.length > 0">
           <span class="ctrl-label">Thread:</span>
           <select v-model="filterSessionId" class="thread-select mono" @change="onSessionChange">
-            <option value="">-- Focus Single Thread --</option>
+            <option value="">-- All Threads --</option>
             <option v-for="s in allSessions.slice(0, 15)" :key="s.sessionId" :value="s.sessionId">
               {{ s.threadName }} ({{ s.turnCount }}t)
             </option>
@@ -163,17 +198,17 @@ async function confirmAndApply() {
     <div class="scope-summary-pill">
       <span class="pill-icon">📊</span>
       <span class="pill-text">
-        <strong>Diagnosis Scope:</strong> {{ diagnosticScope?.label || 'All History' }} • 
-        <strong>{{ diagnosticScope?.sessionCount || 0 }}</strong> session(s) analyzed • 
-        <strong>{{ (diagnosticScope?.totalTokens || 0).toLocaleString() }}</strong> tokens 
-        <span v-if="diagnosticScope?.cacheHitRate">({{ diagnosticScope.cacheHitRate }}% cached)</span>
+        <strong>Optimization Scope:</strong> {{ localScope?.label || 'All History' }} • 
+        <strong>{{ localScope?.sessionCount || 0 }}</strong> session(s) diagnosed • 
+        <strong>{{ (localScope?.totalTokens || 0).toLocaleString() }}</strong> tokens 
+        <span v-if="localScope?.cacheHitRate">({{ localScope.cacheHitRate }}% cached)</span>
       </span>
     </div>
 
     <!-- Diagnostic Tabs -->
-    <div class="tabs-nav" v-if="diagnostics.length > 1">
+    <div class="tabs-nav" v-if="localDiagnostics.length > 1">
       <button 
-        v-for="(diag, idx) in diagnostics" 
+        v-for="(diag, idx) in localDiagnostics" 
         :key="diag.id"
         :class="['tab-btn', { active: activeDiagnosticIndex === idx }]"
         @click="activeDiagnosticIndex = idx"
@@ -182,19 +217,25 @@ async function confirmAndApply() {
       </button>
     </div>
 
+    <!-- Loading State -->
+    <div v-if="isDiagLoading" class="diag-loading">
+      <div class="spinner"></div>
+      <p>Simulating diagnostics for {{ localScope?.label }}...</p>
+    </div>
+
     <!-- Active Diagnostic View -->
-    <div v-if="diagnostics.length > 0" class="diagnostic-container">
+    <div v-else-if="localDiagnostics.length > 0" class="diagnostic-container">
       <div class="diag-banner">
         <div class="banner-top">
           <span class="badge badge-yellow">⚠️ Detected Inefficiency</span>
-          <h4 class="diag-title">{{ diagnostics[activeDiagnosticIndex].title }}</h4>
+          <h4 class="diag-title">{{ localDiagnostics[activeDiagnosticIndex].title }}</h4>
         </div>
-        <p class="diag-headline">{{ diagnostics[activeDiagnosticIndex].headline }}</p>
+        <p class="diag-headline">{{ localDiagnostics[activeDiagnosticIndex].headline }}</p>
 
         <!-- What-If Simulation Box -->
         <div class="what-if-box">
           <div class="what-if-head">
-            <span class="what-if-tag">🔬 Quantified What-If Simulation ({{ diagnosticScope?.label || 'All Time' }})</span>
+            <span class="what-if-tag">🔬 Quantified What-If Simulation ({{ localScope?.label || 'All Time' }})</span>
             <Tooltip 
               title="Mathematical Impact Simulation" 
               text="Calculates your exact historical waste in this time window and forecasts quota recovery if an optimization is applied." 
@@ -203,18 +244,18 @@ async function confirmAndApply() {
           <div class="sim-metrics-grid">
             <div class="sim-stat">
               <span class="sim-stat-label">Wasted in this Period</span>
-              <span class="sim-stat-val text-red mono">~{{ diagnostics[activeDiagnosticIndex].quantifiedWaste.tokensWasted.toLocaleString() }} tokens</span>
+              <span class="sim-stat-val text-red mono">~{{ localDiagnostics[activeDiagnosticIndex].quantifiedWaste.tokensWasted.toLocaleString() }} tokens</span>
             </div>
             <div class="sim-stat">
               <span class="sim-stat-label">5-Hour Quota Impact</span>
-              <span class="sim-stat-val text-yellow mono">{{ diagnostics[activeDiagnosticIndex].quantifiedWaste.quotaPercent }}% of Limit</span>
+              <span class="sim-stat-val text-yellow mono">{{ localDiagnostics[activeDiagnosticIndex].quantifiedWaste.quotaPercent }}% of Limit</span>
             </div>
             <div class="sim-stat">
               <span class="sim-stat-label">Projected Token Reduction</span>
-              <span class="sim-stat-val text-green mono">-{{ diagnostics[activeDiagnosticIndex].whatIfSimulation.savedPercent }}% Noise</span>
+              <span class="sim-stat-val text-green mono">-{{ localDiagnostics[activeDiagnosticIndex].whatIfSimulation.savedPercent }}% Noise</span>
             </div>
           </div>
-          <p class="sim-forecast">{{ diagnostics[activeDiagnosticIndex].whatIfSimulation.forecast }}</p>
+          <p class="sim-forecast">{{ localDiagnostics[activeDiagnosticIndex].whatIfSimulation.forecast }}</p>
         </div>
       </div>
 
@@ -227,7 +268,7 @@ async function confirmAndApply() {
 
         <div class="actions-list">
           <div 
-            v-for="action in diagnostics[activeDiagnosticIndex].actions" 
+            v-for="action in localDiagnostics[activeDiagnosticIndex].actions" 
             :key="action.actionId"
             :class="['action-card', { 'recommended-card': action.isRecommended }]"
           >
@@ -482,6 +523,16 @@ async function confirmAndApply() {
   background: rgba(56, 189, 248, 0.15);
   color: var(--accent-blue);
   border-color: var(--accent-blue);
+}
+
+.diag-loading {
+  padding: 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--text-muted);
 }
 
 .diag-banner {
