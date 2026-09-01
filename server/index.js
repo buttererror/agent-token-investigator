@@ -65,7 +65,7 @@ app.get('/api/diagnostics', async (req, res) => {
   try {
     const { scope = 'all', date, sessionId, targetProjectPath = '/home/ellol/solutions/clinic-platform' } = req.query;
     const sessions = await getAllSessions();
-    const overview = await getOverviewMetrics();
+    const overview = await getOverviewMetrics(sessions);
     const result = runDiagnostics(sessions, overview, { scope, date, sessionId }, targetProjectPath);
     res.json(result);
   } catch (err) {
@@ -77,7 +77,7 @@ app.get('/api/diagnostics', async (req, res) => {
 app.get('/api/pacing-forecast', async (req, res) => {
   try {
     const sessions = await getAllSessions();
-    const overview = await getOverviewMetrics();
+    const overview = await getOverviewMetrics(sessions);
     const forecast = calculatePacingForecast(overview.latestRateLimit, sessions);
     res.json(forecast);
   } catch (err) {
@@ -235,4 +235,10 @@ if (fs.existsSync(distPath)) {
 
 app.listen(PORT, () => {
   console.log(`⚡ Agent Token Tracker API running on http://localhost:${PORT}`);
+  // Background pre-warm sessions cache for instant initial page load
+  getAllSessions().then(s => {
+    console.log(`⚡ Pre-warmed ${s.length} sessions in cache`);
+  }).catch(err => {
+    console.error('Session cache warm-up error:', err.message);
+  });
 });

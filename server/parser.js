@@ -12,6 +12,11 @@ const fileCache = new Map();
 let lastIndexCache = null;
 let lastIndexMtime = 0;
 
+let inFlightAllSessionsPromise = null;
+let lastSessionsCache = null;
+let lastSessionsCacheTime = 0;
+const SESSIONS_CACHE_TTL_MS = 3000;
+
 /**
  * Reads session_index.jsonl to map session_id to thread_name (cached by mtime)
  */
@@ -21,17 +26,18 @@ export async function getSessionIndex() {
   }
 
   try {
-    const stat = fs.statSync(INDEX_FILE);
+    const stat = await fs.promises.stat(INDEX_FILE);
     if (lastIndexCache && stat.mtimeMs === lastIndexMtime) {
       return lastIndexCache;
     }
 
     const indexMap = new Map();
-    const fileStream = fs.createReadStream(INDEX_FILE);
-    const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
+    const content = await fs.promises.readFile(INDEX_FILE, 'utf8');
+    const lines = content.split('\n');
 
-    for await (const line of rl) {
-      if (!line.trim()) continue;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
       try {
         const data = JSON.parse(line);
         if (data.id) {
@@ -77,14 +83,14 @@ export function findSessionFiles(dir = SESSIONS_DIR) {
  * Parses a single session JSONL file with full turn-by-turn breakdown (with mtime caching)
  */
 export async function parseSessionFile(filePath) {
-  const stat = fs.statSync(filePath);
+  const stat = await fs.promises.stat(filePath);
   const cached = fileCache.get(filePath);
   if (cached && cached.mtimeMs === stat.mtimeMs) {
     return cached.session;
   }
 
-  const fileStream = fs.createReadStream(filePath);
-  const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
+  const content = await fs.promises.readFile(filePath, 'utf8');
+  const lines = content.split('\n');
 
   let sessionMeta = null;
   let latestRateLimits = null;
@@ -92,8 +98,9 @@ export async function parseSessionFile(filePath) {
   const turns = [];
   let currentTurn = null;
 
-  for await (const line of rl) {
-    if (!line.trim()) continue;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
     let entry;
     try {
       entry = JSON.parse(line);
@@ -242,41 +249,61 @@ export async function parseSessionFile(filePath) {
 }
 
 /**
- * Ingests all sessions concurrently with fast mtime caching
+ * Ingests all sessions concurrently with fast mtime caching & in-flight promise deduplication
  */
-export async function getAllSessions() {
-  const [indexMap, sessionFiles] = await Promise.all([
-    getSessionIndex(),
-    Promise.resolve(findSessionFiles())
-  ]);
+export async function getAllSessions(forceRefresh = false) {
+  const now = Date.now();
+  if (!forceRefresh && lastSessionsCache && (now - lastSessionsCacheTime < SESSIONS_CACHE_TTL_MS)) {
+    return lastSessionsCache;
+  }
 
-  const sessionPromises = sessionFiles.map(async (file) => {
+  if (inFlightAllSessionsPromise) {
+    return inFlightAllSessionsPromise;
+  }
+
+  inFlightAllSessionsPromise = (async () => {
     try {
-      const session = await parseSessionFile(file);
-      const indexEntry = indexMap.get(session.sessionId) || indexMap.get(session.meta.id);
-      return {
-        ...session,
-        threadName: indexEntry?.threadName || 'Codex Task ' + session.sessionId.substring(0, 8),
-        updatedAt: indexEntry?.updatedAt || session.meta.timestamp
-      };
-    } catch (e) {
-      return null;
+      const [indexMap, sessionFiles] = await Promise.all([
+        getSessionIndex(),
+        Promise.resolve(findSessionFiles())
+      ]);
+
+      const sessionPromises = sessionFiles.map(async (file) => {
+        try {
+          const session = await parseSessionFile(file);
+          const indexEntry = indexMap.get(session.sessionId) || indexMap.get(session.meta.id);
+          return {
+            ...session,
+            threadName: indexEntry?.threadName || 'Codex Task ' + session.sessionId.substring(0, 8),
+            updatedAt: indexEntry?.updatedAt || session.meta.timestamp
+          };
+        } catch (e) {
+          return null;
+        }
+      });
+
+      const resolved = await Promise.all(sessionPromises);
+      const sessions = resolved.filter(Boolean);
+
+      // Sort by most recent
+      sessions.sort((a, b) => new Date(b.updatedAt || b.meta.timestamp) - new Date(a.updatedAt || a.meta.timestamp));
+
+      lastSessionsCache = sessions;
+      lastSessionsCacheTime = Date.now();
+      return sessions;
+    } finally {
+      inFlightAllSessionsPromise = null;
     }
-  });
+  })();
 
-  const resolved = await Promise.all(sessionPromises);
-  const sessions = resolved.filter(Boolean);
-
-  // Sort by most recent
-  sessions.sort((a, b) => new Date(b.updatedAt || b.meta.timestamp) - new Date(a.updatedAt || a.meta.timestamp));
-  return sessions;
+  return inFlightAllSessionsPromise;
 }
 
 /**
  * Returns latest rate limit snapshot and aggregate metrics
  */
-export async function getOverviewMetrics() {
-  const sessions = await getAllSessions();
+export async function getOverviewMetrics(preloadedSessions = null) {
+  const sessions = preloadedSessions || await getAllSessions();
 
   let totalInput = 0;
   let totalCached = 0;
