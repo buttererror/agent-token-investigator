@@ -13,39 +13,38 @@ const props = defineProps({
   activeAgent: {
     type: String,
     default: 'codex'
+  },
+  isDiagnosticsLoading: {
+    type: Boolean,
+    default: false
+  },
+  isScopeStale: {
+    type: Boolean,
+    default: false
+  },
+  error: {
+    type: String,
+    default: null
+  },
+  sessionCount: {
+    type: Number,
+    default: 0
   }
 });
 
-const emit = defineEmits(['create-issue', 'inspect-affected', 'issue-generated']);
+const emit = defineEmits(['create-issue', 'inspect-affected', 'issue-generated', 'change-scope']);
 
 const isCreatingIssue = ref(false);
+
+const isAllProjects = computed(() => {
+  return !props.activeWorkspace || props.activeWorkspace === 'all';
+});
 const issueSuccessMessage = ref('');
 
-// Fallback values if no diagnostic is returned from the server
-const rec = computed(() => {
-  if (props.recommendation) return props.recommendation;
-  return {
-    id: 'diag-test-noise',
-    title: 'Reduce noisy test output',
-    headline: 'Verbose test output is inflating input tokens without adding value.',
-    affectedCount: 61,
-    affectedUnit: 'test commands affected',
-    measuredImpact: {
-      tokens: 5080000,
-      label: 'input tokens observed'
-    },
-    actions: [
-      {
-        actionId: 'action-pkg-script',
-        title: 'Action 2: Inject "test:agent" Lean Script to package.json',
-        targetFile: 'package.json'
-      }
-    ]
-  };
-});
+const rec = computed(() => props.recommendation);
 
 const formattedTokens = computed(() => {
-  const t = rec.value?.measuredImpact?.tokens || 5080000;
+  const t = rec.value?.measuredImpact?.tokens || 0;
   if (t >= 1000000) {
     return `${(t / 1000000).toFixed(2)}M`;
   }
@@ -55,24 +54,14 @@ const formattedTokens = computed(() => {
   return t.toLocaleString();
 });
 
-const affectedCount = computed(() => {
-  return rec.value?.affectedCount ?? 61;
-});
-
-const affectedUnit = computed(() => {
-  return rec.value?.affectedUnit ?? 'test commands affected';
-});
+const affectedCount = computed(() => rec.value?.affectedCount ?? 0);
+const affectedUnit = computed(() => rec.value?.affectedUnit ?? 'affected');
 
 async function handleCreateIssue() {
   isCreatingIssue.value = true;
   issueSuccessMessage.value = '';
   try {
-    const action = rec.value?.actions?.[0] || {
-      actionId: 'action-pkg-script',
-      title: 'Action 2: Inject "test:agent" Lean Script to package.json',
-      targetFile: 'package.json'
-    };
-
+    const action = rec.value?.actions?.[0] || {};
     const res = await fetch('/api/recommendations/generate-issue', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -108,20 +97,58 @@ function handleInspect() {
 
 <template>
   <div class="top-rec-card">
-    <!-- Card Header Tag -->
     <div class="rec-header-row">
       <span class="rec-label">TOP RECOMMENDATION</span>
-      <span class="badge badge-caution">
+      <span v-if="rec && !isDiagnosticsLoading && !error" class="badge badge-caution">
         <svg class="caution-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
           <path d="M8 2.5L2 13h12L8 2.5z" stroke-linecap="round" stroke-linejoin="round"/>
           <path d="M8 6.5v3M8 11.5h.01" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
         CAUTION
       </span>
+      <span v-if="isScopeStale && rec && !isDiagnosticsLoading" class="badge" style="background: rgba(245, 179, 1, 0.1); color: var(--dashboard-amber);">
+        STALE
+      </span>
     </div>
 
-    <!-- 3-Region Desktop Grid -->
-    <div class="rec-grid">
+    <!-- STATE: Error -->
+    <div v-if="error" class="state-container state-error">
+      <div class="state-icon">⚠️</div>
+      <div class="state-content">
+        <h3>Diagnostic Failure</h3>
+        <p>{{ error }}</p>
+      </div>
+    </div>
+
+    <!-- STATE: Loading -->
+    <div v-else-if="isDiagnosticsLoading && !isScopeStale" class="state-container state-loading">
+      <div class="spinner"></div>
+      <div class="state-content">
+        <h3>Analyzing this scope…</h3>
+        <p>Scanning token telemetry for optimization opportunities.</p>
+      </div>
+    </div>
+
+    <!-- STATE: No Sessions -->
+    <div v-else-if="sessionCount === 0" class="state-container state-empty">
+      <div class="state-icon">🔍</div>
+      <div class="state-content">
+        <h3>No sessions recorded in this scope</h3>
+        <p>There is no telemetry data for the selected agent and workspace in this time range.</p>
+      </div>
+    </div>
+
+    <!-- STATE: No Meaningful Inefficiency -->
+    <div v-else-if="!rec" class="state-container state-success">
+      <div class="state-icon">✨</div>
+      <div class="state-content">
+        <h3>No major token inefficiencies found</h3>
+        <p>Your current usage appears healthy. You can manually inspect <a href="#" @click.prevent="handleInspect">Sessions</a> or <a href="#" @click.prevent="$emit('change-scope')">change the scope</a> to analyze further.</p>
+      </div>
+    </div>
+
+    <!-- STATE: Recommendation Available -->
+    <div v-else class="rec-grid" :class="{ 'is-stale': isDiagnosticsLoading || isScopeStale }">
       <!-- 1. Finding Region -->
       <div class="finding-region">
         <div class="finding-icon-wrap">
@@ -160,7 +187,7 @@ function handleInspect() {
           </svg>
           <div class="ev-text">
             <span class="ev-highlight-val">{{ formattedTokens }}</span>
-            <span class="ev-highlight-label">input tokens observed</span>
+            <span class="ev-highlight-label">{{ rec.measuredImpact?.label || 'input tokens observed' }}</span>
           </div>
         </div>
 
@@ -182,15 +209,19 @@ function handleInspect() {
 
         <button 
           class="btn-primary-action"
-          :disabled="isCreatingIssue"
+          :disabled="isCreatingIssue || isAllProjects"
           @click="handleCreateIssue"
         >
           <svg class="btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
             <path d="M10 2H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5l-3-3z"/>
             <path d="M10 2v3h3M8 7.5v4M6 9.5h4"/>
           </svg>
-          {{ isCreatingIssue ? 'Creating issue…' : 'Create implementation issue' }}
+          {{ isCreatingIssue ? 'Creating issue…' : 'Preview implementation issue' }}
         </button>
+
+        <div v-if="isAllProjects" class="issue-success-note" style="color: var(--dashboard-text-muted); font-size: 0.8rem; margin-top: 8px;">
+          Cannot draft issue across all projects. Select a specific project first.
+        </div>
 
         <button 
           class="btn-secondary-action"
@@ -446,4 +477,60 @@ function handleInspect() {
     gap: 20px;
   }
 }
+
+.state-container {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 24px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: var(--dashboard-radius);
+  border: 1px solid var(--dashboard-border);
+}
+
+.state-icon {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid rgba(255,255,255,0.1);
+  border-top-color: var(--dashboard-cyan);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.state-content h3 {
+  margin: 0 0 8px 0;
+  font-size: 1.1rem;
+  color: var(--dashboard-text);
+}
+
+.state-content p {
+  margin: 0;
+  color: var(--dashboard-text-muted);
+  font-size: 0.95rem;
+}
+
+.state-content a {
+  color: var(--dashboard-cyan);
+  text-decoration: none;
+}
+
+.state-content a:hover {
+  text-decoration: underline;
+}
+
+.is-stale {
+  opacity: 0.6;
+  pointer-events: none;
+  filter: grayscale(0.5);
+}
+
 </style>

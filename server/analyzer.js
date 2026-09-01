@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { loadGuidanceRecords } from './guidanceLogger.js';
+import { getSessionTimestamp, getTimeRangeBoundary } from '../src/utils/timeUtils.js';
 
 const TEST_COMMAND_PATTERN = /(?:^|[;&|]\s*)(?:(?:pnpm|npm|yarn|bun)\b[^\n]*\b(?:test(?::[\w-]+)?|jest|vitest|mocha|ava)\b|(?:jest|vitest|mocha|ava|pytest)\b)/i;
 const ROUTINE_TASK_PATTERN = /\b(?:docs?|documentation|format(?:ting)?|rename|typo|read|review|status|list)\b/i;
@@ -129,7 +130,7 @@ export function checkActionStatus(targetProjectPath, action) {
  * Analyzer & Guided What-If Optimization Engine with Date & Scope Filters
  */
 export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, targetProjectPath = null) {
-  const { scope = 'all', date = null, startHour = null, sessionId = null } = filterOptions;
+  const { scope = 'all', date = null, startHour = null, sessionId = null, agent = 'all', workspace = 'all' } = filterOptions;
 
   let targetSessions = [...sessions];
   let scopeLabel = 'All Recorded History';
@@ -140,10 +141,8 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
   } else if (scope === 'date' && date) {
     targetSessions = sessions.filter(s => (s.updatedAt || s.meta?.timestamp || '').startsWith(date));
     scopeLabel = `Specific Date (${date})`;
-  } else if (scope === '5hour' || scope === '5h') {
-    const selectedDate = date || new Date().toISOString().split('T')[0];
-    
-    if (startHour !== undefined && startHour !== null && startHour !== 'latest' && startHour !== '') {
+  } else if ((scope === '5hour' || scope === '5h') && startHour !== undefined && startHour !== null && startHour !== 'latest' && startHour !== '') {
+      const selectedDate = date || new Date().toISOString().split('T')[0];
       const h = parseInt(startHour, 10);
       const safeH = isNaN(h) ? 0 : Math.max(0, Math.min(19, h));
       const endH = safeH + 5;
@@ -155,57 +154,31 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
       const endTime = new Date(endStr).getTime();
       
       targetSessions = sessions.filter(s => {
-        const sTime = new Date(s.updatedAt || s.meta?.timestamp || 0).getTime();
+        const sTime = getSessionTimestamp(s);
         return sTime >= startTime && sTime <= endTime;
       });
       scopeLabel = `5-Hour Window: ${selectedDate} (${String(safeH).padStart(2, '0')}:00 – ${String(endH).padStart(2, '0')}:00)`;
-    } else {
-      const baseTime = date 
-        ? new Date(date + 'T23:59:59').getTime() 
-        : (sessions[0]?.updatedAt ? new Date(sessions[0].updatedAt).getTime() : Date.now());
-      const fiveHoursAgo = baseTime - (5 * 60 * 60 * 1000);
-      targetSessions = sessions.filter(s => {
-        const sTime = new Date(s.updatedAt || s.meta?.timestamp || 0).getTime();
-        return sTime >= fiveHoursAgo && sTime <= baseTime;
-      });
-      scopeLabel = date ? `Latest 5-Hour Window on ${date}` : `Latest 5-Hour Rate-Limit Window`;
-    }
-  } else if (scope === 'today') {
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const startMs = todayStart.getTime();
-    targetSessions = sessions.filter(s => {
-      const sTime = new Date(s.updatedAt || s.meta?.timestamp || 0).getTime();
-      return sTime >= startMs;
-    });
-    scopeLabel = 'Today';
-  } else if (scope === '24h') {
-    const baseTime = sessions[0]?.updatedAt ? new Date(sessions[0].updatedAt).getTime() : Date.now();
-    const oneDayAgo = baseTime - (24 * 60 * 60 * 1000);
-    targetSessions = sessions.filter(s => {
-      const sTime = new Date(s.updatedAt || s.meta?.timestamp || 0).getTime();
-      return sTime >= oneDayAgo && sTime <= baseTime;
-    });
-    scopeLabel = 'Last 24 Hours';
-  } else if (scope === 'weekly' || scope === '7d') {
+  } else {
     const baseTime = date 
-      ? new Date(date + 'T23:59:59Z').getTime() 
-      : (sessions[0]?.updatedAt ? new Date(sessions[0].updatedAt).getTime() : Date.now());
-    const sevenDaysAgo = baseTime - (7 * 24 * 60 * 60 * 1000);
+      ? new Date(date + 'T23:59:59').getTime() 
+      : (sessions[0] ? getSessionTimestamp(sessions[0]) : Date.now());
+    const boundary = getTimeRangeBoundary(scope, baseTime);
     targetSessions = sessions.filter(s => {
-      const sTime = new Date(s.updatedAt || s.meta?.timestamp || 0).getTime();
-      return sTime >= sevenDaysAgo && sTime <= baseTime;
+      const sTime = getSessionTimestamp(s);
+      return sTime >= boundary.startTime && sTime <= boundary.endTime;
     });
-    scopeLabel = date ? `7-Day Window ending ${date}` : `Last 7 Days`;
-  } else if (scope === '30d') {
-    const baseTime = sessions[0]?.updatedAt ? new Date(sessions[0].updatedAt).getTime() : Date.now();
-    const thirtyDaysAgo = baseTime - (30 * 24 * 60 * 60 * 1000);
-    targetSessions = sessions.filter(s => {
-      const sTime = new Date(s.updatedAt || s.meta?.timestamp || 0).getTime();
-      return sTime >= thirtyDaysAgo && sTime <= baseTime;
-    });
-    scopeLabel = 'Last 30 Days';
+    // Add date specifiers to label if needed
+    if (date && scope === '5h') {
+        scopeLabel = `Latest 5-Hour Window on ${date}`;
+    } else if (date && (scope === 'weekly' || scope === '7d')) {
+        scopeLabel = `7-Day Window ending ${date}`;
+    } else if (date && scope === '30d') {
+        scopeLabel = `30-Day Window ending ${date}`;
+    } else {
+        scopeLabel = boundary.scopeLabel;
+    }
   }
+
 
   // Calculate tokens in filtered window
   const totalTokensInScope = targetSessions.reduce((acc, s) => acc + (s.totalUsage?.total_tokens || 0), 0);
@@ -465,6 +438,7 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
   }
 
   return {
+    appliedScope: { timeRange: scope, workspace, agent },
     scope: {
       mode: scope,
       label: scopeLabel,
@@ -486,105 +460,67 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
 export function calculatePacingForecast(rateLimitSnapshot, sessions) {
   const rateLimits = rateLimitSnapshot?.snapshot || rateLimitSnapshot || null;
   const primary = rateLimits?.primary;
+  const secondary = rateLimits?.secondary;
   const quotaAvailable = Number.isFinite(primary?.used_percent) && Number.isFinite(primary?.resets_at);
-  const usedPercent = quotaAvailable ? primary.used_percent : null;
-  const resetsAt = quotaAvailable ? primary.resets_at : null;
-  const nowSec = Date.now() / 1000;
-  const minutesUntilReset = quotaAvailable ? Math.max(Math.round((resetsAt - nowSec) / 60), 0) : null;
   const snapshotAt = Number.isFinite(rateLimitSnapshot?.timestamp) ? rateLimitSnapshot.timestamp : null;
   const snapshotAgeMinutes = snapshotAt === null ? null : Math.max(Math.round((Date.now() - snapshotAt) / 60000), 0);
   const snapshotIsFresh = snapshotAgeMinutes !== null && snapshotAgeMinutes <= 5;
 
-  const providerSnapshots = (sessions || [])
-    .flatMap((session) => (session.turns || []).map((turn) => ({
-      sessionId: session.sessionId,
-      timestamp: Date.parse(turn.startedAt),
-      usedPercent: turn.rateLimits?.primary?.used_percent
-    })))
-    .filter((snapshot) => Number.isFinite(snapshot.timestamp) && Number.isFinite(snapshot.usedPercent))
-    .sort((a, b) => a.timestamp - b.timestamp);
-  const oneHourAgo = Date.now() - (60 * 60 * 1000);
-  const recentProviderSnapshots = providerSnapshots.filter((snapshot) => snapshot.timestamp >= oneHourAgo);
-  const firstRecentSnapshot = recentProviderSnapshots[0] || null;
-  const lastRecentSnapshot = recentProviderSnapshots.at(-1) || null;
-  const usageChange = firstRecentSnapshot && lastRecentSnapshot && firstRecentSnapshot !== lastRecentSnapshot
-    ? {
-      fromPercent: firstRecentSnapshot.usedPercent,
-      toPercent: lastRecentSnapshot.usedPercent,
-      periodMinutes: Math.max(Math.round((lastRecentSnapshot.timestamp - firstRecentSnapshot.timestamp) / 60000), 1)
+  let windows = [];
+  if (quotaAvailable) {
+    if (primary) {
+      windows.push({
+        id: 'primary',
+        label: '5-hour limit',
+        usedPercent: primary.used_percent,
+        resetsAt: new Date(primary.resets_at * 1000).toISOString()
+      });
     }
-    : null;
-  const evidenceStart = firstRecentSnapshot?.timestamp || oneHourAgo;
-  const activeSessionCount = new Set((sessions || []).filter((session) =>
-    (session.turns || []).some((turn) => Date.parse(turn.startedAt) >= evidenceStart)
-  ).map((session) => session.sessionId)).size;
-  const likelyContributors = (sessions || [])
-    .flatMap((session) => (session.turns || []).map((turn) => ({
-      sessionId: session.sessionId,
-      startedAt: turn.startedAt,
-      observedTokens: turn.tokenUsage?.total_tokens || 0,
-      confidence: 'likely-contributor'
-    })))
-    .filter((turn) => Date.parse(turn.startedAt) >= evidenceStart && turn.observedTokens > 0)
-    .sort((a, b) => b.observedTokens - a.observedTokens)
-    .slice(0, 3);
-
-  // Local activity estimate from transcript turns seen in the last two hours.
-  // This must not be presented as a provider quota measurement.
-  let recentTokens = 0;
-  const twoHoursAgo = nowSec - (2 * 60 * 60);
-  for (const session of sessions) {
-    for (const turn of session.turns || []) {
-      const timestamp = Date.parse(turn.startedAt) / 1000;
-      if (Number.isFinite(timestamp) && timestamp >= twoHoursAgo) {
-        recentTokens += turn.tokenUsage?.total_tokens || 0;
-      }
+    if (secondary) {
+      windows.push({
+        id: 'secondary',
+        label: 'Weekly rolling limit',
+        usedPercent: secondary.used_percent,
+        resetsAt: secondary.resets_at ? new Date(secondary.resets_at * 1000).toISOString() : null
+      });
     }
   }
-  const observedTokensPerMinute = Math.round(recentTokens / 120);
 
   if (!quotaAvailable || !snapshotIsFresh) {
     return {
-      quotaAvailable: false,
-      usedPercent: null,
-      minutesUntilReset: null,
-      rateLimits: null,
-      providerSnapshotAt: snapshotAt,
-      snapshotAgeMinutes,
-      observedTokensLastTwoHours: recentTokens,
-      observedTokensPerMinute,
-      evidence: { usageChange, activeSessionCount, likelyContributors },
+      available: false,
       status: 'UNAVAILABLE',
+      headline: 'Provider quota is unavailable',
+      observedAt: snapshotAt ? new Date(snapshotAt).toISOString() : null,
+      windows: [],
       advice: snapshotAt
         ? `The latest provider quota snapshot is ${snapshotAgeMinutes}m old, so current quota is unavailable.`
-        : 'Live provider quota is unavailable in transcript logs. Local activity is estimated from the last two hours only.'
+        : 'Live provider quota is unavailable in transcript logs.'
     };
   }
 
-  let status = 'HEALTHY';
-  let advice = usageChange && usageChange.toPercent > usageChange.fromPercent
-    ? `Provider usage rose ${usageChange.fromPercent}% → ${usageChange.toPercent}% in ${usageChange.periodMinutes}m across ${activeSessionCount} active session(s).`
-    : 'Provider usage is below the warning threshold.';
+  const maxUsed = Math.max(primary?.used_percent || 0, secondary?.used_percent || 0);
 
-  if (usedPercent >= 80) {
+  let status = 'SUSTAINABLE';
+  let headline = 'Usage is sustainable';
+  let advice = 'Provider usage is below the warning threshold.';
+
+  if (maxUsed >= 80) {
     status = 'CRITICAL';
-    advice = `Provider usage is ${usedPercent}%. Avoid starting additional heavy tasks until reset.`;
-  } else if (usedPercent >= 60) {
+    headline = 'Usage is at high risk';
+    advice = `Provider usage is ${maxUsed}%. Avoid starting additional heavy tasks until reset.`;
+  } else if (maxUsed >= 60) {
     status = 'WARNING';
-    advice = `Provider usage is ${usedPercent}%. Keep work focused and use low reasoning for routine tasks.`;
+    headline = 'Usage is approaching the limit';
+    advice = `Provider usage is ${maxUsed}%. Keep work focused and use low reasoning for routine tasks.`;
   }
 
   return {
-    quotaAvailable: true,
-    usedPercent,
-    minutesUntilReset,
-    rateLimits,
-    providerSnapshotAt: snapshotAt,
-    snapshotAgeMinutes,
-    observedTokensLastTwoHours: recentTokens,
-    observedTokensPerMinute,
-    evidence: { usageChange, activeSessionCount, likelyContributors },
+    available: true,
     status,
+    headline,
+    observedAt: snapshotAt ? new Date(snapshotAt).toISOString() : null,
+    windows,
     advice
   };
 }

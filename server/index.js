@@ -11,7 +11,7 @@ import { runVerificationBenchmark } from './benchmarkEngine.js';
 import { logGuidanceChange, getGuidanceRecordsForProject, getTrackedProjects } from './guidanceLogger.js';
 import { generateTurnIssueReport, generateRecommendationIssueReport, generatePacingIssueReport, listTokenIssues, readTokenIssue, deleteTokenIssue, saveTokenIssue } from './tokenIssueGenerator.js';
 import { addCustomProject, removeCustomProject, browseDirectory, inspectDirectory } from './customProjects.js';
-
+import { getSessionTimestamp, getTimeRangeBoundary } from '../src/utils/timeUtils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -34,7 +34,7 @@ app.use((req, res, next) => {
 // 1. Overview metrics
 app.get('/api/overview', async (req, res) => {
   try {
-    const { agent, workspace } = req.query;
+    const { agent, workspace, timeRange } = req.query;
     let sessions = await getAllSessions();
     if (agent && agent !== 'all') {
       sessions = sessions.filter(s => (s.agentType || 'codex') === agent);
@@ -44,6 +44,13 @@ app.get('/api/overview', async (req, res) => {
       sessions = sessions.filter(s => {
         const cwd = (s.meta?.cwd || '').toLowerCase().replace(/[\/\\]+$/, '');
         return cwd.startsWith(target) || target.startsWith(cwd);
+      });
+    }
+    if (timeRange && timeRange !== 'all') {
+      const boundary = getTimeRangeBoundary(timeRange);
+      sessions = sessions.filter(s => {
+        const sTime = getSessionTimestamp(s);
+        return sTime >= boundary.startTime && sTime <= boundary.endTime;
       });
     }
     const overview = await getOverviewMetrics(sessions);

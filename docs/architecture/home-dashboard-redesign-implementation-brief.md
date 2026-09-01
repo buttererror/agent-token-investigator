@@ -629,3 +629,7 @@ Use the following prompt with this file attached or referenced:
 
 After Slice 1 is reviewed, change only `Slice 1` to `Slice 2`, and repeat. Do not
 send the whole redesign as a single implementation request.
+
+## Post-implementation follow-up
+
+The implemented-dashboard follow-up work now lives in the dedicated [post-implementation dashboard improvements](./post-implementation-dashboard-improvements.md) plan.

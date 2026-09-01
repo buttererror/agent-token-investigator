@@ -1,4 +1,5 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { getSessionTimestamp, getTimeRangeBoundary } from '../utils/timeUtils.js';
 
 export function useTokenData() {
   const overview = ref(null);
@@ -49,6 +50,8 @@ export function useTokenData() {
   const activeAgent = ref(getSavedAgent()); // 'codex' | 'antigravity'
   const activeTimeRange = ref(getSavedTimeRange()); // '5h' | 'today' | '24h' | '7d' | '30d' | 'all'
   const isAutoRefresh = ref(true);
+  const lastDiagnosticsScope = ref(null);
+  const latestRequestedDiagnosticsParams = ref(null);
 
   const filteredSessions = computed(() => {
     let list = sessions.value || [];
@@ -72,52 +75,12 @@ export function useTokenData() {
       return list;
     }
 
-    const now = Date.now();
-    if (timeRange === '5h') {
-      const fiveHoursAgo = now - (5 * 60 * 60 * 1000);
-      return list.filter(s => {
-        const t = new Date(s.updatedAt || s.meta?.timestamp || 0).getTime();
-        return t >= fiveHoursAgo;
-      });
-    }
-
-    if (timeRange === 'today') {
-      const todayStart = new Date();
-      todayStart.setHours(0, 0, 0, 0);
-      const startMs = todayStart.getTime();
-      return list.filter(s => {
-        const t = new Date(s.updatedAt || s.meta?.timestamp || 0).getTime();
-        return t >= startMs;
-      });
-    }
-
-    if (timeRange === '24h') {
-      const dayAgo = now - (24 * 60 * 60 * 1000);
-      return list.filter(s => {
-        const t = new Date(s.updatedAt || s.meta?.timestamp || 0).getTime();
-        return t >= dayAgo;
-      });
-    }
-
-    if (timeRange === '7d') {
-      const sevenDaysAgo = now - (7 * 24 * 60 * 60 * 1000);
-      return list.filter(s => {
-        const t = new Date(s.updatedAt || s.meta?.timestamp || 0).getTime();
-        return t >= sevenDaysAgo;
-      });
-    }
-
-    if (timeRange === '30d') {
-      const thirtyDaysAgo = now - (30 * 24 * 60 * 60 * 1000);
-      return list.filter(s => {
-        const t = new Date(s.updatedAt || s.meta?.timestamp || 0).getTime();
-        return t >= thirtyDaysAgo;
-      });
-    }
-
-    return list;
+    const boundary = getTimeRangeBoundary(timeRange, Date.now());
+    return list.filter(s => {
+      const sTime = getSessionTimestamp(s);
+      return sTime >= boundary.startTime && sTime <= boundary.endTime;
+    });
   });
-
   const filteredOverview = computed(() => {
     const list = filteredSessions.value || [];
     if (!list.length) {
@@ -165,11 +128,7 @@ export function useTokenData() {
 
     if (!latestRate) {
       if (activeAgent.value !== 'antigravity') {
-        latestRate = overview.value?.latestRateLimit || {
-          primary: { used_percent: 0, window_minutes: 300, resets_at: Date.now() / 1000 + 18000 },
-          secondary: { used_percent: 0, window_minutes: 10080, resets_at: Date.now() / 1000 + 604800 },
-          plan_type: 'Plus'
-        };
+        latestRate = overview.value?.latestRateLimit || null;
       }
     }
 
@@ -249,7 +208,7 @@ export function useTokenData() {
       return { session: s, score, reason, freshInput: fresh, cacheReuse: input > 0 ? Math.round((cached / input) * 100) : 0 };
     }
 
-    const scored = list.map(scoreSession);
+    const scored = list.map(scoreSession).filter(item => item.score > 0);
     scored.sort((a, b) => b.score - a.score || b.freshInput - a.freshInput);
 
     return scored.slice(0, 3).map(item => ({
@@ -261,7 +220,15 @@ export function useTokenData() {
   });
 
   // The API is the single pacing implementation; do not recompute quota locally.
-  const filteredPacingForecast = computed(() => pacingForecast.value);
+  const filteredPacingForecast = computed(() => {
+    if (!pacingForecast.value) return null;
+    const p = { ...pacingForecast.value };
+    // Label Provider Quota when project/time filters do not apply.
+    if ((activeWorkspace.value && activeWorkspace.value !== 'all') || (activeTimeRange.value && activeTimeRange.value !== 'all')) {
+      p.sourceLabel = 'Account-level provider quota';
+    }
+    return p;
+  });
 
   let pollTimer = null;
 
@@ -281,23 +248,33 @@ export function useTokenData() {
 
   async function fetchDiagnostics() {
     isDiagnosticsLoading.value = true;
+    const currentParams = new URLSearchParams({
+      agent: activeAgent.value,
+      scope: activeTimeRange.value,
+      timeRange: activeTimeRange.value,
+      workspace: activeWorkspace.value || 'all',
+      targetProjectPath: activeWorkspace.value || 'all'
+    }).toString();
+    
+    latestRequestedDiagnosticsParams.value = currentParams;
+
     try {
-      const params = new URLSearchParams({
-        agent: activeAgent.value,
-        scope: activeTimeRange.value,
-        timeRange: activeTimeRange.value,
-        workspace: activeWorkspace.value || 'all',
-        targetProjectPath: activeWorkspace.value || 'all'
-      });
-      const res = await fetch(`/api/diagnostics?${params.toString()}`);
+      const res = await fetch(`/api/diagnostics?${currentParams}`);
       if (res.ok) {
         const data = await res.json();
+        if (latestRequestedDiagnosticsParams.value !== currentParams) {
+          // Stale response ignored
+          return;
+        }
         diagnostics.value = data.diagnostics || [];
+        lastDiagnosticsScope.value = data.appliedScope || null;
       }
     } catch (err) {
       console.error('Failed to load diagnostics:', err);
     } finally {
-      isDiagnosticsLoading.value = false;
+      if (latestRequestedDiagnosticsParams.value === currentParams) {
+        isDiagnosticsLoading.value = false;
+      }
     }
   }
 
@@ -437,11 +414,14 @@ export function useTokenData() {
   async function fetchAll() {
     try {
       const pacingParams = new URLSearchParams({ agent: activeAgent.value });
+      const overviewParams = new URLSearchParams({ agent: activeAgent.value, timeRange: activeTimeRange.value });
+      
       if (activeWorkspace.value && activeWorkspace.value !== 'all') {
         pacingParams.set('workspace', activeWorkspace.value);
+        overviewParams.set('workspace', activeWorkspace.value);
       }
       const [overviewRes, sessionsRes, pacingRes, glossaryRes, projectsRes] = await Promise.all([
-        fetch('/api/overview'),
+        fetch(`/api/overview?${overviewParams}`),
         fetch('/api/sessions'),
         fetch(`/api/pacing-forecast?${pacingParams}`),
         fetch('/api/glossary'),
@@ -510,6 +490,7 @@ export function useTokenData() {
     activeWorkspace,
     activeAgent,
     activeTimeRange,
+    lastDiagnosticsScope,
     currentView,
     isAutoRefresh,
     setWorkspace,

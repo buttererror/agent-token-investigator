@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from 'vue';
+import { getSessionTimestamp, getTimeRangeBoundary } from '../../utils/timeUtils.js';
 
 const props = defineProps({
   sessions: {
@@ -21,41 +22,105 @@ const props = defineProps({
 });
 
 const title = computed(() => {
-  if (props.activeTimeRange === '5h') return 'USAGE TREND (LAST 5 HOURS)';
-  if (props.activeTimeRange === 'today') return 'USAGE TREND (TODAY)';
-  if (props.activeTimeRange === '24h') return 'USAGE TREND (LAST 24 HOURS)';
-  if (props.activeTimeRange === '30d') return 'USAGE TREND (LAST 30 DAYS)';
-  if (props.activeTimeRange === 'all') return 'USAGE TREND (RECORDED SESSIONS)';
-  return 'USAGE TREND (LAST 7 DAYS)';
+  if (props.activeTimeRange === '5h') return 'OBSERVED TOKEN ACTIVITY (LAST 5 HOURS)';
+  if (props.activeTimeRange === 'today') return 'OBSERVED TOKEN ACTIVITY (TODAY)';
+  if (props.activeTimeRange === '24h') return 'OBSERVED TOKEN ACTIVITY (LAST 24 HOURS)';
+  if (props.activeTimeRange === '30d') return 'OBSERVED TOKEN ACTIVITY (LAST 30 DAYS)';
+  if (props.activeTimeRange === 'all') return 'OBSERVED TOKEN ACTIVITY (ALL RECORDED SESSIONS)';
+  return 'OBSERVED TOKEN ACTIVITY (LAST 7 DAYS)';
 });
 
-// Generate 7 data points from recent sessions or realistic interpolation
+// Calculate Buckets
 const trendData = computed(() => {
-  const currentPct = props.rateLimits?.secondary?.used_percent ?? 
-    (props.pacingForecast?.usedPercent ?? 35);
+  const boundary = getTimeRangeBoundary(props.activeTimeRange);
+  let startMs = boundary.startTime;
+  const endMs = boundary.endTime === Number.MAX_SAFE_INTEGER ? Date.now() : boundary.endTime;
 
-  const numPoints = 7;
-  const now = new Date();
-  const points = [];
-
-  for (let i = numPoints - 1; i >= 0; i--) {
-    const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
-    const dateLabel = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-    
-    // Smooth trend curve reaching currentPct on the last day
-    let pct = 0;
-    if (i === 0) {
-      pct = currentPct;
-    } else {
-      // Prior day trajectory
-      const ratio = 1 - (i / (numPoints - 1));
-      pct = Math.round(Math.max(12, currentPct * (0.4 + ratio * 0.6) + Math.sin(i * 1.5) * 5));
+  if (!startMs || props.activeTimeRange === 'all') {
+    // For 'all', find the earliest session
+    let earliest = endMs - 30 * 24 * 60 * 60 * 1000;
+    for (const session of props.sessions) {
+      const ts = getSessionTimestamp(session);
+      if (ts > 0 && ts < earliest) earliest = ts;
     }
-
-    points.push({ date: dateLabel, pct });
+    startMs = earliest;
   }
 
-  return points;
+  const rangeMs = endMs - startMs;
+  
+  let bucketSizeMs;
+  let formatLabel;
+  
+  // Decide bucket size
+  if (props.activeTimeRange === '5h' || props.activeTimeRange === '24h' || props.activeTimeRange === 'today') {
+    bucketSizeMs = 60 * 60 * 1000; // Hourly
+    formatLabel = (d) => d.toLocaleTimeString('en-US', { hour: 'numeric' });
+  } else if (props.activeTimeRange === 'all' && rangeMs > 30 * 24 * 60 * 60 * 1000) {
+    bucketSizeMs = 7 * 24 * 60 * 60 * 1000; // Weekly
+    formatLabel = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  } else {
+    bucketSizeMs = 24 * 60 * 60 * 1000; // Daily
+    formatLabel = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+
+  // Create empty buckets
+  const buckets = [];
+  let currentStart = startMs;
+  while (currentStart < endMs) {
+    buckets.push({
+      start: currentStart,
+      end: currentStart + bucketSizeMs,
+      label: formatLabel(new Date(currentStart)),
+      freshInput: 0,
+      cachedInput: 0
+    });
+    currentStart += bucketSizeMs;
+  }
+  
+  // Aggregate sessions
+  for (const session of props.sessions) {
+    const timestamp = getSessionTimestamp(session);
+    if (timestamp >= startMs) {
+      const bIndex = buckets.findIndex(b => timestamp >= b.start && timestamp < b.end);
+      if (bIndex !== -1) {
+        const inputTokens = session.totalUsage?.input_tokens || 0;
+        const cachedTokens = session.totalUsage?.cached_input_tokens || 0;
+        const freshTokens = Math.max(0, inputTokens - cachedTokens);
+        
+        buckets[bIndex].freshInput += freshTokens;
+        buckets[bIndex].cachedInput += cachedTokens;
+      }
+    }
+  }
+  
+  // For display, we can cap the number of buckets to something reasonable if it's too long
+  return buckets;
+});
+
+const maxValue = computed(() => {
+  let max = 100;
+  for (const b of trendData.value) {
+    const total = b.freshInput + b.cachedInput;
+    if (total > max) max = total;
+  }
+  return max;
+});
+
+function formatTokenCount(t) {
+  if (t >= 1000000) return (t / 1000000).toFixed(1) + 'M';
+  if (t >= 1000) return (t / 1000).toFixed(0) + 'k';
+  return t.toString();
+}
+
+const yAxisLabels = computed(() => {
+  const m = maxValue.value;
+  return [
+    formatTokenCount(m),
+    formatTokenCount(m * 0.75),
+    formatTokenCount(m * 0.5),
+    formatTokenCount(m * 0.25),
+    '0'
+  ];
 });
 
 // SVG Chart calculation
@@ -71,40 +136,33 @@ const pointsSvg = computed(() => {
 
   const availableWidth = chartWidth - paddingX * 2;
   const availableHeight = chartHeight - paddingTop - paddingBottom;
+  const max = maxValue.value;
 
   return data.map((d, index) => {
-    const x = paddingX + (index / (data.length - 1)) * availableWidth;
-    const y = paddingTop + availableHeight * (1 - d.pct / 100);
-    return { ...d, x, y };
+    const x = paddingX + (index / Math.max(1, data.length - 1)) * availableWidth;
+    const yFresh = paddingTop + availableHeight * (1 - (d.freshInput + d.cachedInput) / max); // Total height
+    const yCached = paddingTop + availableHeight * (1 - d.cachedInput / max);
+    return { ...d, x, yFresh, yCached };
   });
 });
 
-const pathD = computed(() => {
+const pathDFresh = computed(() => {
   const pts = pointsSvg.value;
   if (!pts.length) return '';
-  
-  let d = `M ${pts[0].x} ${pts[0].y}`;
-  for (let i = 0; i < pts.length - 1; i++) {
-    const p0 = pts[i];
-    const p1 = pts[i + 1];
-    const mx = (p0.x + p1.x) / 2;
-    d += ` C ${mx} ${p0.y}, ${mx} ${p1.y}, ${p1.x} ${p1.y}`;
+  let d = `M ${pts[0].x} ${pts[0].yFresh}`;
+  for (let i = 1; i < pts.length; i++) {
+    d += ` L ${pts[i].x} ${pts[i].yFresh}`;
   }
   return d;
 });
 
-const areaD = computed(() => {
+const areaDFresh = computed(() => {
   const pts = pointsSvg.value;
   if (!pts.length) return '';
   const baseline = chartHeight - paddingBottom;
-  let d = pathD.value;
+  let d = pathDFresh.value;
   d += ` L ${pts[pts.length - 1].x} ${baseline} L ${pts[0].x} ${baseline} Z`;
   return d;
-});
-
-const latestPoint = computed(() => {
-  const pts = pointsSvg.value;
-  return pts.length > 0 ? pts[pts.length - 1] : null;
 });
 </script>
 
@@ -112,17 +170,13 @@ const latestPoint = computed(() => {
   <div class="usage-trend-card">
     <div class="card-header-row">
       <span class="card-top-label">{{ title }}</span>
-      <span class="limit-legend">Weekly limit</span>
     </div>
+    <div class="subtitle-note">Local telemetry · Not a provider quota conversion</div>
 
     <div class="chart-container">
       <!-- Y-Axis Labels -->
       <div class="y-axis">
-        <span>100%</span>
-        <span>75%</span>
-        <span>50%</span>
-        <span>25%</span>
-        <span>0%</span>
+        <span v-for="(lbl, idx) in yAxisLabels" :key="idx">{{ lbl }}</span>
       </div>
 
       <!-- SVG Chart -->
@@ -133,76 +187,51 @@ const latestPoint = computed(() => {
               <stop offset="0%" stop-color="#2dcaf5" stop-opacity="0.32" />
               <stop offset="100%" stop-color="#2dcaf5" stop-opacity="0.0" />
             </linearGradient>
-            <filter id="cyanGlow" x="-20%" y="-20%" width="140%" height="140%">
-              <feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="#2dcaf5" flood-opacity="0.6" />
-            </filter>
           </defs>
 
-          <!-- 100% Limit Line (Dashed) -->
-          <line 
-            :x1="paddingX" 
-            :y1="paddingTop" 
-            :x2="chartWidth - paddingX" 
-            :y2="paddingTop" 
-            stroke="#475569" 
-            stroke-dasharray="3 3" 
-            stroke-width="1"
-          />
-
-          <!-- 50% Grid Line -->
-          <line 
-            :x1="paddingX" 
-            :y1="paddingTop + (chartHeight - paddingTop - paddingBottom) * 0.5" 
-            :x2="chartWidth - paddingX" 
-            :y2="paddingTop + (chartHeight - paddingTop - paddingBottom) * 0.5" 
-            stroke="#1e293b" 
-            stroke-width="1"
-          />
-
-          <!-- Area Gradient Fill -->
-          <path :d="areaD" fill="url(#cyanAreaGradient)" />
-
-          <!-- Main Smooth Line -->
+          <!-- Area -->
           <path 
-            :d="pathD" 
+            v-if="areaDFresh"
+            :d="areaDFresh" 
+            fill="url(#cyanAreaGradient)" 
+          />
+          
+          <!-- Line -->
+          <path 
+            v-if="pathDFresh"
+            :d="pathDFresh" 
             fill="none" 
             stroke="#2dcaf5" 
-            stroke-width="2.5" 
-            stroke-linecap="round" 
+            stroke-width="2" 
+            stroke-linecap="round"
             stroke-linejoin="round"
-            filter="url(#cyanGlow)"
           />
 
-          <!-- Data Points -->
+          <!-- Data Points (only show if they have data or if the dataset is small) -->
           <circle 
-            v-for="(p, i) in pointsSvg" 
-            :key="i"
-            :cx="p.x" 
-            :cy="p.y" 
-            r="3" 
-            fill="#2dcaf5" 
-            stroke="#0b1626" 
+            v-for="(pt, idx) in pointsSvg" 
+            :key="'pt-'+idx"
+            :cx="pt.x" 
+            :cy="pt.yFresh" 
+            :r="pt.freshInput + pt.cachedInput > 0 ? 3 : 1" 
+            fill="#0f172a" 
+            stroke="#2dcaf5" 
             stroke-width="1.5"
           />
         </svg>
 
-        <!-- Current Value Pill Badge on End Point -->
-        <div 
-          v-if="latestPoint" 
-          class="latest-val-badge"
-          :style="{
-            right: `${chartWidth - latestPoint.x - 14}px`,
-            top: `${latestPoint.y - 12}px`
-          }"
-        >
-          {{ latestPoint.pct }}%
+        <!-- X-Axis Labels (HTML overlay) -->
+        <div class="x-axis-labels">
+          <span 
+            v-for="(pt, i) in pointsSvg.filter((_, idx, arr) => arr.length <= 14 ? true : idx % Math.ceil(arr.length / 7) === 0)" 
+            :key="'xl-'+i" 
+            class="x-label"
+            :style="{ left: `${(pt.x / chartWidth) * 100}%` }"
+          >
+            {{ pt.label }}
+          </span>
         </div>
       </div>
-    </div>
-
-    <!-- X-Axis Labels -->
-    <div class="x-axis">
-      <span v-for="(p, i) in pointsSvg" :key="i">{{ p.date }}</span>
     </div>
   </div>
 </template>
@@ -323,4 +352,12 @@ const latestPoint = computed(() => {
     display: none;
   }
 }
+
+.subtitle-note {
+  font-size: 0.75rem;
+  color: var(--dashboard-text-muted);
+  margin-top: -16px;
+  margin-bottom: 20px;
+}
+
 </style>

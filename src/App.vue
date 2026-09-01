@@ -30,6 +30,8 @@ const {
   guidanceRecords,
   isLoading,
   isRecordsLoading,
+  isDiagnosticsLoading,
+  lastDiagnosticsScope,
   error,
   selectedSession,
   activeWorkspace,
@@ -57,6 +59,13 @@ const isGuidanceRecordsOpen = ref(false);
 const isIssuesOpen = ref(false);
 const issuesCount = ref(0);
 const activeInspectSession = ref(null);
+
+import { computed } from 'vue';
+const isScopeStale = computed(() => {
+  const last = lastDiagnosticsScope.value;
+  if (!last) return false;
+  return last.timeRange !== activeTimeRange.value || last.workspace !== activeWorkspace.value || last.agent !== activeAgent.value;
+});
 
 async function fetchIssuesCount(targetPath = activeWorkspace.value) {
   try {

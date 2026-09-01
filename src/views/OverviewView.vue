@@ -36,6 +36,18 @@ const props = defineProps({
   activeTimeRange: {
     type: String,
     default: '7d'
+  },
+  isDiagnosticsLoading: {
+    type: Boolean,
+    default: false
+  },
+  isScopeStale: {
+    type: Boolean,
+    default: false
+  },
+  error: {
+    type: String,
+    default: null
   }
 });
 
@@ -49,7 +61,6 @@ const emit = defineEmits(['inspect-session', 'view-all-sessions', 'issue-generat
       <div class="quota-col">
         <ProviderQuotaSummary 
           :pacing-forecast="pacingForecast"
-          :rate-limits="overview?.latestRateLimit || pacingForecast?.rateLimits"
           :active-agent="activeAgent"
         />
       </div>
@@ -64,11 +75,16 @@ const emit = defineEmits(['inspect-session', 'view-all-sessions', 'issue-generat
       </div>
     </div>
 
+
     <!-- Top Recommendation Panel -->
     <TopRecommendation 
       :recommendation="topRecommendation"
       :active-workspace="activeWorkspace"
       :active-agent="activeAgent"
+      :is-diagnostics-loading="isDiagnosticsLoading"
+      :is-scope-stale="isScopeStale"
+      :error="error"
+      :session-count="sessions.length"
       @inspect-affected="$emit('view-all-sessions')"
       @issue-generated="data => $emit('issue-generated', data)"
     />
@@ -83,6 +99,19 @@ const emit = defineEmits(['inspect-session', 'view-all-sessions', 'issue-generat
 </template>
 
 <style scoped>
+
+.loading-bar {
+  background: var(--dashboard-surface);
+  border: 1px solid var(--dashboard-border);
+  padding: 8px 16px;
+  border-radius: var(--dashboard-radius);
+  color: var(--dashboard-text-muted);
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .overview-view {
   display: flex;
   flex-direction: column;
