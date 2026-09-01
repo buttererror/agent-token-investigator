@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue';
+import { ref, computed } from 'vue';
 import Tooltip from './common/Tooltip.vue';
 
 const props = defineProps({
@@ -10,6 +10,8 @@ const props = defineProps({
 });
 
 defineEmits(['close', 'export-handoff']);
+
+const showBestPractices = ref(false);
 
 const cacheRate = computed(() => {
   const inp = props.session?.totalUsage?.input_tokens || 0;
@@ -54,6 +56,65 @@ const sessionVerdict = computed(() => {
     actionAdvice: 'Operating normally within standard efficiency thresholds.'
   };
 });
+
+function getTurnEfficiency(turn) {
+  if (!turn.tokenUsage) {
+    return {
+      score: 100,
+      badgeType: 'green',
+      label: '🟢 Efficient',
+      summary: 'Lean turn without heavy token footprint.'
+    };
+  }
+
+  const inp = turn.tokenUsage.input_tokens || 0;
+  const cached = turn.tokenUsage.cached_input_tokens || 0;
+  const out = turn.tokenUsage.output_tokens || 0;
+  const fresh = Math.max(inp - cached, 0);
+  const cachePct = inp > 0 ? Math.round((cached / inp) * 100) : 0;
+
+  if (fresh > 35000 || out > 4000) {
+    return {
+      score: 45,
+      badgeType: 'red',
+      label: '🔴 Inefficient Payload',
+      cachePct,
+      fresh,
+      summary: fresh > 35000 ? `High uncached fresh input (${fresh.toLocaleString()} tokens)` : `Large model output (${out.toLocaleString()} tokens)`
+    };
+  }
+
+  if (cachePct >= 85) {
+    return {
+      score: 95,
+      badgeType: 'green',
+      label: `🟢 ${cachePct}% Cached`,
+      cachePct,
+      fresh,
+      summary: `High prompt cache reuse (${cached.toLocaleString()} tokens cached, only ${fresh.toLocaleString()} fresh).`
+    };
+  }
+
+  if (cachePct >= 50) {
+    return {
+      score: 75,
+      badgeType: 'yellow',
+      label: `🟡 ${cachePct}% Cached`,
+      cachePct,
+      fresh,
+      summary: `Moderate cache hit (${fresh.toLocaleString()} fresh tokens added).`
+    };
+  }
+
+  return {
+    score: 60,
+    badgeType: 'yellow',
+    label: '🟡 Low Cache Hit',
+    cachePct,
+    fresh,
+    summary: `Cold prompt input with minimal cache reuse.`
+  };
+}
 
 function formatToolArg(input) {
   if (!input) return '';
@@ -119,6 +180,63 @@ function formatToolArg(input) {
         </div>
       </div>
 
+      <!-- In-Session Turn Efficiency Best Practices Guide (Collapsible) -->
+      <div class="practices-guide card">
+        <div class="practices-head" @click="showBestPractices = !showBestPractices">
+          <div class="practices-title">
+            <span>💡</span>
+            <strong>How to Maximize Turn Efficiency Inside One Active Session</strong>
+          </div>
+          <button class="toggle-btn mono">
+            {{ showBestPractices ? '▲ Hide Guide' : '▼ View 4 In-Session Strategies' }}
+          </button>
+        </div>
+
+        <div v-if="showBestPractices" class="practices-body">
+          <div class="strategy-grid">
+            <div class="strat-item">
+              <div class="strat-title">
+                <span class="strat-num">1</span>
+                <strong>Scope Tool Invocations</strong>
+              </div>
+              <p class="strat-desc">
+                Never run unrestricted test suites in chat. Prompt with <code>pnpm test -- --bail 1 --silent</code> so failing runs return only 1 error line instead of 40 pages of logs.
+              </p>
+            </div>
+
+            <div class="strat-item">
+              <div class="strat-title">
+                <span class="strat-num">2</span>
+                <strong>Target File Slices</strong>
+              </div>
+              <p class="strat-desc">
+                Instruct the agent to use <code>grep_search</code> and read line ranges (e.g. lines 15–45) rather than loading entire 1,000-line files into the prompt.
+              </p>
+            </div>
+
+            <div class="strat-item">
+              <div class="strat-title">
+                <span class="strat-num">3</span>
+                <strong>Single-Objective Atomic Turns</strong>
+              </div>
+              <p class="strat-desc">
+                Ask for one concrete slice at a time. Multi-part prompts trigger 15+ tool calls in one turn, creating massive un-cached turn bloat.
+              </p>
+            </div>
+
+            <div class="strat-item">
+              <div class="strat-title">
+                <span class="strat-num">4</span>
+                <strong>Preserve Prompt Prefixes</strong>
+              </div>
+              <p class="strat-desc">
+                OpenAI caches prompt context from top to bottom. Keep instructions in <code>AGENTS.md</code> and <code>.agents/skills/</code> to ensure 85%+ cache reuse on every follow-up.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Turns Timeline -->
       <div class="turns-timeline">
         <div 
@@ -133,16 +251,28 @@ function formatToolArg(input) {
               <span v-if="turn.durationMs" class="turn-dur mono text-dim">({{ (turn.durationMs / 1000).toFixed(1) }}s)</span>
             </div>
 
-            <!-- Per Turn Token Breakdown -->
-            <div v-if="turn.tokenUsage" class="turn-tokens-pill mono">
-              <span title="Input Tokens">In: {{ (turn.tokenUsage.input_tokens || 0).toLocaleString() }}</span>
-              <span class="sep">•</span>
-              <span class="text-green" title="Cached Tokens">Cache: {{ (turn.tokenUsage.cached_input_tokens || 0).toLocaleString() }}</span>
-              <span class="sep">•</span>
-              <span class="text-purple" title="Reasoning Tokens">Think: {{ (turn.tokenUsage.reasoning_output_tokens || 0).toLocaleString() }}</span>
-              <span class="sep">•</span>
-              <span title="Output Tokens">Out: {{ (turn.tokenUsage.output_tokens || 0).toLocaleString() }}</span>
+            <!-- Per Turn Efficiency Score Badge -->
+            <div class="turn-efficiency-group">
+              <span :class="['badge', `badge-${getTurnEfficiency(turn).badgeType}`]">
+                {{ getTurnEfficiency(turn).label }}
+              </span>
+
+              <!-- Per Turn Token Breakdown -->
+              <div v-if="turn.tokenUsage" class="turn-tokens-pill mono">
+                <span title="Total Input">In: {{ (turn.tokenUsage.input_tokens || 0).toLocaleString() }}</span>
+                <span class="sep">•</span>
+                <span class="text-green" title="Cached Tokens">Cache: {{ (turn.tokenUsage.cached_input_tokens || 0).toLocaleString() }}</span>
+                <span class="sep">•</span>
+                <span class="text-purple" title="Reasoning Tokens">Think: {{ (turn.tokenUsage.reasoning_output_tokens || 0).toLocaleString() }}</span>
+                <span class="sep">•</span>
+                <span title="Output Tokens">Out: {{ (turn.tokenUsage.output_tokens || 0).toLocaleString() }}</span>
+              </div>
             </div>
+          </div>
+
+          <!-- Turn Efficiency Diagnosis -->
+          <div class="turn-diagnosis-text text-dim">
+            <span>⚡ <strong>Turn Footprint:</strong> {{ getTurnEfficiency(turn).summary }}</span>
           </div>
 
           <!-- Noise Spikes Alert (if any) -->
@@ -242,7 +372,7 @@ function formatToolArg(input) {
 .verdict-card {
   padding: 14px 18px;
   border-radius: 10px;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -285,6 +415,99 @@ function formatToolArg(input) {
   color: var(--text-muted);
 }
 
+/* Practices Guide Card */
+.practices-guide {
+  background-color: rgba(56, 189, 248, 0.05);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  border-radius: 10px;
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+
+.practices-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  cursor: pointer;
+  background-color: rgba(56, 189, 248, 0.08);
+}
+
+.practices-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--accent-blue);
+}
+
+.toggle-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.practices-body {
+  padding: 16px;
+}
+
+.strategy-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+@media (max-width: 768px) {
+  .strategy-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.strat-item {
+  background-color: var(--bg-input);
+  border: 1px solid var(--border-color);
+  padding: 12px;
+  border-radius: 8px;
+}
+
+.strat-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  font-size: 0.82rem;
+  color: var(--text-main);
+}
+
+.strat-num {
+  background: var(--accent-blue);
+  color: #0b0f19;
+  font-weight: 800;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+}
+
+.strat-desc {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.strat-desc code {
+  background-color: #0b0f19;
+  padding: 2px 4px;
+  border-radius: 4px;
+  color: var(--accent-yellow);
+}
+
+/* Turns Timeline */
 .turns-timeline {
   display: flex;
   flex-direction: column;
@@ -307,7 +530,7 @@ function formatToolArg(input) {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 10px;
+  margin-bottom: 6px;
   flex-wrap: wrap;
   gap: 8px;
 }
@@ -331,6 +554,13 @@ function formatToolArg(input) {
   font-size: 0.72rem;
 }
 
+.turn-efficiency-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .turn-tokens-pill {
   font-size: 0.72rem;
   background-color: #1e293b;
@@ -338,6 +568,14 @@ function formatToolArg(input) {
   border-radius: 6px;
   display: flex;
   gap: 6px;
+}
+
+.turn-diagnosis-text {
+  font-size: 0.75rem;
+  margin-bottom: 10px;
+  padding: 4px 8px;
+  background-color: rgba(0,0,0,0.2);
+  border-radius: 6px;
 }
 
 .sep {
