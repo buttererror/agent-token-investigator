@@ -9,7 +9,7 @@ import { compileSessionHandoff } from './handoffCompiler.js';
 import { lintPrompt } from './promptLinterEngine.js';
 import { runVerificationBenchmark } from './benchmarkEngine.js';
 import { logGuidanceChange, getGuidanceRecordsForProject, getTrackedProjects } from './guidanceLogger.js';
-import { generateTurnIssueReport, listTokenIssues } from './tokenIssueGenerator.js';
+import { generateTurnIssueReport, generateRecommendationIssueReport, listTokenIssues, readTokenIssue, deleteTokenIssue } from './tokenIssueGenerator.js';
 import { addCustomProject, removeCustomProject, browseDirectory, inspectDirectory } from './customProjects.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -279,11 +279,46 @@ app.post('/api/generate-turn-issue', (req, res) => {
   }
 });
 
+app.post('/api/recommendations/generate-issue', (req, res) => {
+  try {
+    const { projectPath, diagnostic, action } = req.body;
+    if (!diagnostic) {
+      return res.status(400).json({ error: 'diagnostic is required to generate recommendation issue doc' });
+    }
+    const result = generateRecommendationIssueReport({ projectPath, diagnostic, action });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/token-issues', (req, res) => {
   try {
     const { projectPath = process.cwd() } = req.query;
     const issues = listTokenIssues(projectPath);
     res.json(issues);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/token-issues/read', (req, res) => {
+  try {
+    const { projectPath = process.cwd(), fileName } = req.query;
+    if (!fileName) return res.status(400).json({ error: 'fileName is required' });
+    const content = readTokenIssue(projectPath, fileName);
+    res.json({ content });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/token-issues', (req, res) => {
+  try {
+    const { projectPath = process.cwd(), fileName } = req.body;
+    if (!fileName) return res.status(400).json({ error: 'fileName is required' });
+    const success = deleteTokenIssue(projectPath, fileName);
+    res.json({ success });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

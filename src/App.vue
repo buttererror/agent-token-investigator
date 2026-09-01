@@ -16,6 +16,7 @@ import ActionSkillGeneratorModal from './components/ActionSkillGeneratorModal.vu
 import BenchmarkModal from './components/BenchmarkModal.vue';
 import GuidanceRecordsModal from './components/GuidanceRecordsModal.vue';
 import ProjectSelectorModal from './components/ProjectSelectorModal.vue';
+import AgentIssuesModal from './components/AgentIssuesModal.vue';
 
 const {
   overview,
@@ -51,7 +52,19 @@ const isSkillGenOpen = ref(false);
 const isBenchmarkOpen = ref(false);
 const isGuidanceRecordsOpen = ref(false);
 const isProjectSelectorOpen = ref(false);
+const isIssuesOpen = ref(false);
+const issuesCount = ref(0);
 const activeInspectSession = ref(null);
+
+async function fetchIssuesCount(targetPath = activeWorkspace.value) {
+  try {
+    const res = await fetch(`/api/token-issues?projectPath=${encodeURIComponent(targetPath)}`);
+    if (res.ok) {
+      const list = await res.json();
+      issuesCount.value = list.length;
+    }
+  } catch {}
+}
 
 function handleInspect(session) {
   activeInspectSession.value = session;
@@ -69,6 +82,7 @@ function toggleRefresh() {
 
 function handleWorkspaceChange(newPath) {
   setWorkspace(newPath);
+  fetchIssuesCount(newPath);
 }
 
 function handleAgentChange(newAgent) {
@@ -77,6 +91,7 @@ function handleAgentChange(newAgent) {
 
 function handleProjectAdded(newProj) {
   setWorkspace(newProj.path);
+  fetchIssuesCount(newProj.path);
   refresh();
 }
 
@@ -86,12 +101,18 @@ async function handleProjectRemoved(projPath) {
 
 async function handleAddGuidanceRecord(recordData) {
   await addGuidanceRecord(recordData);
+  fetchIssuesCount(activeWorkspace.value);
 }
 
 async function handleRollback(backupId) {
   await undoLastAction(backupId);
   fetchGuidanceRecords();
+  fetchIssuesCount(activeWorkspace.value);
 }
+
+onMounted(() => {
+  fetchIssuesCount(activeWorkspace.value);
+});
 </script>
 
 <template>
@@ -102,6 +123,7 @@ async function handleRollback(backupId) {
       :active-agent="activeAgent"
       :projects="projects"
       :records-count="guidanceRecords.length"
+      :issues-count="issuesCount"
       :is-auto-refresh="isAutoRefresh"
       @toggle-refresh="toggleRefresh"
       @open-guide="isGuideOpen = true"
@@ -109,6 +131,7 @@ async function handleRollback(backupId) {
       @open-benchmark="isBenchmarkOpen = true"
       @open-guidance-records="isGuidanceRecordsOpen = true"
       @open-project-selector="isProjectSelectorOpen = true"
+      @open-issues="isIssuesOpen = true"
       @change-workspace="handleWorkspaceChange"
       @change-agent="handleAgentChange"
     />
@@ -121,22 +144,23 @@ async function handleRollback(backupId) {
         :pacing-forecast="pacingForecast"
       />
 
-      <!-- Top Summary Metrics Cards with Inline Time Filters -->
+      <!-- Overview Metrics Grid -->
       <MetricsOverview :overview="filteredOverview" :sessions="filteredSessions" />
 
-      <!-- Interactive Analytics & Burn Charts -->
+      <!-- Token Burn Velocity Chart -->
       <TokenBurnChart :overview="filteredOverview" :sessions="filteredSessions" />
 
-      <!-- Centerpiece: Guided Optimization Advisor (Section-Scoped What-If Simulator & Actions) -->
+      <!-- Guided Optimizer & What-If Action Selector -->
       <GuidedOptimizer 
         :all-sessions="filteredSessions"
         :active-workspace="activeWorkspace"
         @open-handoff="isHandoffOpen = true"
         @open-skill-gen="isSkillGenOpen = true"
         @open-linter="isLinterOpen = true"
+        @issue-generated="() => fetchIssuesCount(activeWorkspace)"
       />
 
-      <!-- Session Explorer Table -->
+      <!-- Actionable Session List & Turn Inspector -->
       <SessionList 
         :sessions="filteredSessions" 
         @inspect-session="handleInspect"
@@ -146,12 +170,12 @@ async function handleRollback(backupId) {
     <!-- Loading State -->
     <div v-else class="loading-screen">
       <div class="spinner"></div>
-      <p>Reading ~/.codex session rollouts and computing token analytics...</p>
+      <p>Parsing agent telemetry & analyzing token consumption...</p>
     </div>
 
     <!-- Modals & Drawers -->
     <GuidanceRecordsModal 
-      :is-open="isGuidanceRecordsOpen"
+      v-if="isGuidanceRecordsOpen"
       :active-workspace="activeWorkspace"
       :projects="projects"
       :records="guidanceRecords"
@@ -174,7 +198,7 @@ async function handleRollback(backupId) {
       :active-workspace="activeWorkspace"
       @close="activeInspectSession = null"
       @export-handoff="handleExportHandoff"
-      @guidance-updated="() => fetchGuidanceRecords(activeWorkspace)"
+      @guidance-updated="() => { fetchGuidanceRecords(activeWorkspace); fetchIssuesCount(activeWorkspace); }"
     />
 
     <ActionPromptLinterModal 
@@ -209,6 +233,13 @@ async function handleRollback(backupId) {
       @project-selected="handleWorkspaceChange"
       @project-added="handleProjectAdded"
       @project-removed="handleProjectRemoved"
+    />
+
+    <AgentIssuesModal 
+      :is-open="isIssuesOpen"
+      :active-workspace="activeWorkspace"
+      @close="isIssuesOpen = false"
+      @issues-updated="cnt => issuesCount = cnt"
     />
   </div>
 </template>

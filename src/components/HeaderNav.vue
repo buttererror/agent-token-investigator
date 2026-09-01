@@ -18,6 +18,10 @@ const props = defineProps({
     type: Number,
     default: 0
   },
+  issuesCount: {
+    type: Number,
+    default: 0
+  },
   isAutoRefresh: {
     type: Boolean,
     required: true
@@ -31,6 +35,7 @@ const emit = defineEmits([
   'open-benchmark',
   'open-guidance-records',
   'open-project-selector',
+  'open-issues',
   'change-workspace',
   'change-agent'
 ]);
@@ -118,6 +123,15 @@ function onSelectProject(e) {
     </div>
 
     <div class="header-right">
+      <button 
+        class="btn btn-secondary btn-sm"
+        @click="$emit('open-issues')"
+        title="View and copy generated agent work orders in docs/tokens-consumptions/issues/"
+      >
+        <span>📋</span> Issues (docs/)
+        <span v-if="issuesCount > 0" class="mini-count-badge badge-accent">{{ issuesCount }}</span>
+      </button>
+
       <button 
         class="btn btn-secondary btn-sm"
         @click="$emit('open-guidance-records')"
@@ -321,6 +335,22 @@ function onSelectProject(e) {
   0% { opacity: 1; }
   50% { opacity: 0.3; }
   100% { opacity: 1; }
+}
+
+.mini-count-badge {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--text-dim);
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 9999px;
+}
+
+.mini-count-badge.badge-accent {
+  background: rgba(168, 85, 247, 0.2);
+  border-color: rgba(168, 85, 247, 0.4);
+  color: var(--accent-purple);
 }
 
 @media (max-width: 900px) {

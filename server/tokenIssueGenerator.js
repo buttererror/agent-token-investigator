@@ -26,19 +26,19 @@ export function getIssueDirectory(projectPath) {
  * Formats a clean tool argument preview
  */
 function formatToolSummary(toolCalls = []) {
-  if (!toolCalls || toolCalls.length === 0) return 'No tool invocations in this turn.';
+  if (!toolCalls || toolCalls.length === 0) return 'No tool invocations recorded in this turn.';
   return toolCalls.map((t, i) => {
     let inputPreview = '';
     if (typeof t.input === 'string') inputPreview = t.input.substring(0, 120);
     else if (typeof t.input === 'object' && t.input) {
-      inputPreview = t.input.cmd || t.input.command || t.input.AbsolutePath || JSON.stringify(t.input).substring(0, 120);
+      inputPreview = t.input.cmd || t.input.command || t.input.AbsolutePath || t.input.Pattern || JSON.stringify(t.input).substring(0, 120);
     }
     return `${i + 1}. \`${t.tool}\`: \`${inputPreview}\``;
   }).join('\n');
 }
 
 /**
- * Generates structured Markdown issue report for a specific session turn
+ * Generates an Autonomous Agent Work Order / Issue Doc for a specific turn
  */
 export function generateTurnIssueReport({ projectPath, session, turn }) {
   const targetDir = getIssueDirectory(projectPath);
@@ -62,60 +62,77 @@ export function generateTurnIssueReport({ projectPath, session, turn }) {
   const hasHighThinking = think > 1200;
   const hasManyTools = (turn.toolCalls?.length || 0) >= 4;
 
-  let problemHeadline = 'Uncached Context Inflation';
+  let problemHeadline = 'Uncached Context Inflation & File Noise';
   let problemDetails = `Turn #${turnNum} injected ${fresh.toLocaleString()} fresh un-cached tokens into prompt history.`;
   let projectedSavingsTokens = Math.round(fresh * 0.85);
-  let badExample = 'Running unconstrained file reads or full test executions without bail flags.';
-  let goodExample = 'Using grep_search with StartLine/EndLine or executing test:agent with --bail 1 --silent.';
+  let recommendedAction = 'Inject progressive disclosure rules into AGENTS.md';
+  let badExample = 'Running unconstrained file reads or unbounded searches without line ranges.';
+  let goodExample = 'Using grep_search with StartLine/EndLine slices or targeted symbol inspection.';
+  let resolutionRules = `- Practice progressive disclosure: always inspect targeted line ranges (StartLine/EndLine) rather than reading entire files into prompt context.`;
 
   if (hasTests) {
     problemHeadline = 'Unfiltered Test Suite Console Noise';
     problemDetails = `Executed test commands without bail or silent flags, dumping raw passing logs and stack traces (~${inp.toLocaleString()} tokens).`;
     projectedSavingsTokens = Math.round(inp * 0.95);
-    badExample = '```bash\npnpm test\n# Dumps 50 passing test logs into prompt context\n```';
-    goodExample = '```bash\npnpm --filter @scope test -- --bail 1 --silent\n# Halts on first error, output payload < 400 tokens\n```';
+    recommendedAction = 'Add a quiet test runner script in package.json and instruct agent in AGENTS.md';
+    badExample = '```bash\npnpm test\n# Dumps dozens of passing test logs into prompt context\n```';
+    goodExample = '```bash\npnpm test -- --bail 1 --silent\n# Halts on first error, output payload < 400 tokens\n```';
+    resolutionRules = `- When executing test suites, always pass \`--bail 1\` and \`--silent\` to keep context lean.\n- Add \`"test:agent": "vitest run --bail 1 --silent"\` to \`package.json\`.`;
   } else if (hasFileSpike) {
     problemHeadline = 'Full-File Reading Instead of Targeted Line Slices';
     problemDetails = `Loaded entire file contents into prompt context rather than using progressive disclosure with line ranges.`;
     projectedSavingsTokens = Math.round(fresh * 0.9);
-    badExample = '```bash\nview_file /path/to/LargeComponent.tsx\n# Reads all 600 lines\n```';
-    goodExample = '```bash\ngrep_search query: "targetFunction" + view_file StartLine: 45 EndLine: 90\n# Reads only 45 relevant lines\n```';
+    recommendedAction = 'Enforce progressive disclosure with StartLine/EndLine in AGENTS.md';
+    badExample = '```bash\nview_file /path/to/LargeFile.js\n# Reads entire 800+ lines into context\n```';
+    goodExample = '```bash\ngrep_search query: "targetSymbol" + view_file StartLine: 40 EndLine: 85\n# Reads only 45 relevant lines\n```';
+    resolutionRules = `- Practice progressive disclosure: always inspect targeted line ranges (\`StartLine\`/\`EndLine\`) rather than reading entire files into prompt context.\n- Never read files over 200 lines in full when making localized edits.`;
   } else if (hasManyTools) {
     problemHeadline = 'Dense Multi-Step Tool Execution Carryover';
     problemDetails = `Executed ${turn.toolCalls.length} distinct tool calls in a single conversational turn, inflating turn payload.`;
     projectedSavingsTokens = Math.round(inp * 0.6);
-    badExample = 'Prompting multi-phase architectural chores in a single unbounded turn.';
-    goodExample = 'Packaging the multi-step verification sequence into a modular `.agents/skills/` preset.';
+    recommendedAction = 'Package multi-step verification into a reusable project skill in .agents/skills/';
+    badExample = 'Prompting multi-phase architectural chores across sequential tool calls in a single unbounded turn.';
+    goodExample = 'Packaging the verification sequence into a modular `.agents/skills/verify-slice/SKILL.md` skill.';
+    resolutionRules = `- Package repetitive multi-turn test/lint workflows into modular \`.agents/skills/\` with \`allow_implicit_invocation: false\`.`;
   }
 
-  const markdownContent = `# Token Inefficiency Issue: Turn #${turnNum} in Session \\\`${sessionShort}\\\`
+  const agentPrompt = `Please inspect and resolve the token inefficiency documented in @docs/tokens-consumptions/issues/${fileName}. Apply the recommended rules to AGENTS.md or package.json, verify with silent flags, and ensure all changes preserve documentation integrity.`;
 
-> **Issue ID**: \\\`ISSUE-TURN-${turnNum}-${sessionShort}\\\`  
-> **Status**: \\\`OPEN / ACTIONABLE\\\`  
-> **Target Workspace**: \\\`${normalizeDir(projectPath)}\\\`  
-> **Generated Date**: ${new Date().toISOString().split('T')[0]}  
-
----
-
-## 1. Session & Turn Reference
-
-| Attribute | Value |
-| :--- | :--- |
-| **Session ID** | [\\\`${sessionId}\\\`](file://${session?.filePath || ''}) |
-| **Thread Name** | **${session?.threadName || 'Untitled Session'}** |
-| **Turn Number** | **Turn #${turnNum}** |
-| **Timestamp** | \\\`${turn.startedAt || new Date().toISOString()}\\\` |
-| **Total Turn Tokens** | **${total.toLocaleString()} tokens** |
-| **Fresh Uncached Input** | **${fresh.toLocaleString()} tokens** |
-| **Cached Input Tokens** | **${cached.toLocaleString()} tokens (${cacheHitRate}% hit rate)** |
-| **Reasoning (Thinking)** | **${think.toLocaleString()} tokens** |
-| **Model Output** | **${out.toLocaleString()} tokens** |
+  const markdownContent = `# 📋 Agent Work Order: Token Inefficiency Resolution
+> **Issue ID**: \`ISSUE-TURN-${turnNum}-${sessionShort}\`  
+> **Status**: \`ACTIONABLE / PENDING AGENT TAKEOVER\`  
+> **Target Workspace**: \`${normalizeDir(projectPath)}\`  
+> **Created Date**: ${new Date().toISOString().split('T')[0]}  
+> **Author**: Agent Token Tracker Diagnostic Engine  
 
 ---
 
-## 2. The Problem
+## 🤖 Handoff Directive for the Project AI Agent
 
-### 🚨 **${problemHeadline}**
+\`\`\`markdown
+${agentPrompt}
+\`\`\`
+
+---
+
+## 1. Session Telemetry & Context
+
+| Metric | Recorded Value | Evaluation |
+| :--- | :--- | :--- |
+| **Session ID** | \`${sessionId}\` | Trajectory file: \`${session?.filePath || ''}\` |
+| **Thread Goal** | **${session?.threadName || 'Untitled Session'}** | User conversation topic |
+| **Turn Number** | **Turn #${turnNum}** | Step where spike occurred |
+| **Total Turn Context** | **${total.toLocaleString()} tokens** | High context accumulation |
+| **Fresh Uncached Payload** | **${fresh.toLocaleString()} tokens** | 🚨 **Spike Source** |
+| **Cached Context** | **${cached.toLocaleString()} tokens (${cacheHitRate}%)** | Cache retention |
+| **Reasoning Tokens** | **${think.toLocaleString()} tokens** | Model deliberation |
+| **Model Response Output** | **${out.toLocaleString()} tokens** | Output payload |
+
+---
+
+## 2. Root Cause Analysis
+
+### 🚨 Problem: **${problemHeadline}**
 ${problemDetails}
 
 ### 🔍 User Request in this Turn:
@@ -126,49 +143,42 @@ ${formatToolSummary(turn.toolCalls)}
 
 ---
 
-## 3. What Can Be Saved
+## 3. Projected Impact & Waste
 
-- **Estimated Token Waste in this Turn**: **~${projectedSavingsTokens.toLocaleString()} tokens**
-- **Projected 5-Hour Rate Limit Savings**: **~${Math.min(Math.round((projectedSavingsTokens / 250000) * 100), 75)}% of rolling quota**
-- **Estimated Financial Savings**: **$${((projectedSavingsTokens / 1000000) * 2.50).toFixed(3)} per occurrence**
-
----
-
-## 4. Actionable Suggestions for AI Agents
-
-When an AI agent picks up this issue, execute the following optimization steps:
-
-1. **Enforce Progressive Disclosure in AGENTS.md**:
-   - Instruct agents to search for symbols first using grep_search or find_by_name before viewing files.
-   - Always supply StartLine and EndLine when viewing files.
-
-2. **Configure Lean Verification Scripts**:
-   - Add a dedicated silent test runner script with --bail 1 and --silent flags in package.json.
-
-3. **Bound Conversation Turns**:
-   - When turn count exceeds 15 turns or fresh input exceeds 25,000 tokens, compile a structured session handoff prompt and initiate a clean thread.
+- **Estimated Token Waste**: **~${projectedSavingsTokens.toLocaleString()} tokens**
+- **5-Hour Rate Limit Quota Reclaimed**: **~${Math.min(Math.round((projectedSavingsTokens / 250000) * 100), 75)}% of rolling budget**
+- **Financial Cost Saved**: **~$${((projectedSavingsTokens / 1000000) * 2.50).toFixed(3)} / session run**
 
 ---
 
-## 5. Concrete Examples (Bad vs. Good)
+## 4. Autonomous Agent Step-by-Step Resolution Plan
+
+When an agent takes over this task, execute these exact steps:
+
+1. **Step 1: Inspect Target Configuration Files**:
+   - Inspect [AGENTS.md](AGENTS.md) and [package.json](package.json) using line slices.
+
+2. **Step 2: Apply Optimization Rule**:
+   - Add the following convention to [AGENTS.md](AGENTS.md) under a \`## Token Optimization Rules\` section:
+\`\`\`markdown
+${resolutionRules}
+\`\`\`
+
+3. **Step 3: Verification**:
+   - Run the project test suite using silent flags to verify no regressions:
+\`\`\`bash
+npm run test:agent || npm test -- --bail 1 --silent
+\`\`\`
+
+---
+
+## 5. Concrete Code Examples
 
 ### ❌ Inefficient Pattern (Observed in Turn #${turnNum}):
 ${badExample}
 
-### ✅ Lean & Cached Pattern (Recommended):
+### ✅ Lean & Cached Pattern (Expected Standard):
 ${goodExample}
-
----
-
-## 6. Quick Automated Resolution
-
-To resolve this token consumption issue, apply the matching action from the **Guided Optimizer** or inject the following rule into [AGENTS.md](AGENTS.md):
-
-\`\`\`markdown
-## Token Optimization Rules
-- When executing test suites, always pass \`--bail 1\` and suppress non-failing logs to keep context lean.
-- Practice progressive disclosure: always inspect targeted line ranges (\`StartLine\`/\`EndLine\`) rather than reading entire files into prompt context.
-\`\`\`
 `;
 
   fs.writeFileSync(filePath, markdownContent, 'utf8');
@@ -177,11 +187,11 @@ To resolve this token consumption issue, apply the matching action from the **Gu
   const record = logGuidanceChange({
     projectPath,
     actionType: 'GENERATE_TOKEN_ISSUE',
-    what: `Generated token issue report for Turn #${turnNum} (${fileName})`,
-    why: `Turn #${turnNum} in session ${sessionShort} consumed ${inp.toLocaleString()} tokens with ${fresh.toLocaleString()} fresh un-cached payload.`,
-    how: `Created structured diagnostic report in docs/tokens-consumptions/issues/${fileName}`,
+    what: `Generated Agent Work Order for Turn #${turnNum} (${fileName})`,
+    why: `Turn #${turnNum} consumed ${inp.toLocaleString()} tokens with ${fresh.toLocaleString()} fresh un-cached payload.`,
+    how: `Created structured handoff document in docs/tokens-consumptions/issues/${fileName}`,
     targetFile: filePath,
-    author: `Token Diagnostic Engine (Turn #${turnNum})`,
+    author: `Agent Token Tracker (Turn #${turnNum})`,
     diff: `+ docs/tokens-consumptions/issues/${fileName}`
   });
 
@@ -191,28 +201,151 @@ To resolve this token consumption issue, apply the matching action from the **Gu
     filePath,
     relativePath: path.join('docs', 'tokens-consumptions', 'issues', fileName),
     content: markdownContent,
+    agentPrompt,
     guidanceRecord: record,
     savings: projectedSavingsTokens
   };
 }
 
 /**
- * Lists all generated issue reports in the project
+ * Generates an Agent Work Order from an Optimizer Recommendation
+ */
+export function generateRecommendationIssueReport({ projectPath, diagnostic, action }) {
+  const targetDir = getIssueDirectory(projectPath);
+  const diagId = diagnostic?.id || 'diag';
+  const timeStr = Date.now().toString().slice(-6);
+  const fileName = `issue-rec-${diagId}-${timeStr}.md`;
+  const filePath = path.join(targetDir, fileName);
+
+  const headline = diagnostic?.headline || 'Token Inefficiency Pattern';
+  const category = diagnostic?.category || 'General Context Bloat';
+  const savings = diagnostic?.wasteQuantification?.estimatedTokens || 25000;
+  const targetFile = action?.targetFile || 'AGENTS.md';
+
+  const agentPrompt = `Please resolve the optimization issue in @docs/tokens-consumptions/issues/${fileName}. Implement the required configuration changes to ${targetFile} and verify with silent test runs.`;
+
+  const markdownContent = `# 📋 Agent Work Order: Optimization Recommendation
+> **Issue ID**: \`ISSUE-REC-${diagId}-${timeStr}\`  
+> **Status**: \`ACTIONABLE / PENDING AGENT TAKEOVER\`  
+> **Category**: \`${category}\`  
+> **Target Workspace**: \`${normalizeDir(projectPath)}\`  
+> **Created Date**: ${new Date().toISOString().split('T')[0]}  
+
+---
+
+## 🤖 Handoff Directive for the Project AI Agent
+
+\`\`\`markdown
+${agentPrompt}
+\`\`\`
+
+---
+
+## 1. Problem Diagnosis
+
+### 🚨 **${headline}**
+${diagnostic?.description || ''}
+
+- **Estimated Wasted Tokens**: **~${savings.toLocaleString()} tokens**
+- **Target File to Update**: [\`${targetFile}\`](${targetFile})
+- **Recommended Action**: **${action?.title || 'Apply Optimization Fix'}**
+
+---
+
+## 2. Autonomous Agent Execution Plan
+
+1. **Step 1: Inspect Target File**:
+   - Inspect [${targetFile}](${targetFile}) with progressive disclosure.
+
+2. **Step 2: Apply Resolution**:
+   - Apply the following change to \`${targetFile}\`:
+\`\`\`
+${action?.customPayload?.ruleText || action?.diffPreview || '// Configure lean token optimization standard'}
+\`\`\`
+
+3. **Step 3: Verification**:
+   - Ensure the repository builds and linters pass with minimal output.
+`;
+
+  fs.writeFileSync(filePath, markdownContent, 'utf8');
+
+  const record = logGuidanceChange({
+    projectPath,
+    actionType: 'GENERATE_TOKEN_ISSUE',
+    what: `Generated Agent Work Order from Recommendation (${fileName})`,
+    why: headline,
+    how: `Created structured handoff document in docs/tokens-consumptions/issues/${fileName}`,
+    targetFile: filePath,
+    author: `Guided Optimizer`,
+    diff: `+ docs/tokens-consumptions/issues/${fileName}`
+  });
+
+  return {
+    success: true,
+    fileName,
+    filePath,
+    relativePath: path.join('docs', 'tokens-consumptions', 'issues', fileName),
+    content: markdownContent,
+    agentPrompt,
+    guidanceRecord: record,
+    savings
+  };
+}
+
+/**
+ * Lists all generated issue reports in the project with metadata
  */
 export function listTokenIssues(projectPath) {
   const targetDir = getIssueDirectory(projectPath);
   if (!fs.existsSync(targetDir)) return [];
 
-  const files = fs.readdirSync(targetDir).filter(f => f.endsWith('.md') && f.startsWith('issue-turn-'));
+  const files = fs.readdirSync(targetDir).filter(f => f.endsWith('.md') && (f.startsWith('issue-turn-') || f.startsWith('issue-rec-')));
   return files.map(file => {
     const fullPath = path.join(targetDir, file);
     const stat = fs.statSync(fullPath);
+    let title = file;
+    let agentPrompt = '';
+    try {
+      const content = fs.readFileSync(fullPath, 'utf8');
+      const titleMatch = content.match(/# (?:📋 )?(.*)/);
+      if (titleMatch) title = titleMatch[1].trim();
+      const promptMatch = content.match(/```markdown\n(Please inspect and resolve[\s\S]*?|Please resolve the optimization[\s\S]*?)\n```/);
+      if (promptMatch) agentPrompt = promptMatch[1].trim();
+    } catch {}
+
     return {
       fileName: file,
       filePath: fullPath,
       relativePath: path.join('docs', 'tokens-consumptions', 'issues', file),
+      title,
+      agentPrompt: agentPrompt || `Please resolve @docs/tokens-consumptions/issues/${file}`,
       size: stat.size,
       updatedAt: stat.mtime.toISOString()
     };
   });
+}
+
+/**
+ * Reads the full content of a specific issue doc
+ */
+export function readTokenIssue(projectPath, fileName) {
+  const targetDir = getIssueDirectory(projectPath);
+  const fullPath = path.join(targetDir, fileName);
+  if (!fs.existsSync(fullPath)) {
+    throw new Error(`Issue document ${fileName} not found`);
+  }
+  return fs.readFileSync(fullPath, 'utf8');
+}
+
+/**
+ * Deletes a resolved issue document
+ */
+export function deleteTokenIssue(projectPath, fileName) {
+  const targetDir = getIssueDirectory(projectPath);
+  const fullPath = path.join(targetDir, fileName);
+  if (fs.existsSync(fullPath)) {
+    fs.unlinkSync(fullPath);
+    return true;
+  }
+  return false;
 }

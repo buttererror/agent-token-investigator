@@ -143,6 +143,35 @@ async function confirmAndApply() {
   fetchLocalDiagnostics();
 }
 
+const isGeneratingIssue = ref(false);
+
+async function generateIssueFromRec(diagnostic, action) {
+  isGeneratingIssue.value = true;
+  try {
+    const res = await fetch('/api/recommendations/generate-issue', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        projectPath: props.activeWorkspace,
+        diagnostic,
+        action
+      })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      emit('issue-generated', data);
+      alert(`✅ Created Agent Work Order!\nFile: ${data.relativePath}\n\nYou can now hand this off to an AI agent in the target repo.`);
+    } else {
+      const err = await res.json();
+      alert(`Failed to generate issue: ${err.error}`);
+    }
+  } catch (e) {
+    alert(`Error: ${e.message}`);
+  } finally {
+    isGeneratingIssue.value = false;
+  }
+}
+
 watch(() => props.activeWorkspace, () => {
   fetchLocalDiagnostics(activeScopeMode.value, filterDate.value, filterSessionId.value);
 });
@@ -369,6 +398,15 @@ onMounted(() => {
                 @click="startEditing(action)"
               >
                 <span>✏️</span> Customize
+              </button>
+
+              <button 
+                class="btn btn-secondary btn-sm btn-doc-issue"
+                :disabled="isGeneratingIssue"
+                @click="generateIssueFromRec(localDiagnostics[activeDiagnosticIndex], action)"
+                title="Generate a structured Agent Work Order in docs/tokens-consumptions/issues/ for a project agent to solve"
+              >
+                <span>📑</span> Generate Agent Issue Doc
               </button>
             </div>
           </div>

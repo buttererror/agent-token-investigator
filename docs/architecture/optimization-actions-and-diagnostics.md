@@ -18,21 +18,36 @@ The diagnostic engine ([`server/analyzer.js`](file:///home/ellol/apps/agent-toke
 
 ---
 
-## 2. Turn Inspector & Issue Report Generator
+## 2. The `docs/` Issue Handoff Mechanism (Agent Work Orders)
 
-### A. Turn Efficiency Diagnosis
-In the **Turn-by-Turn Session Inspector** ([`TurnInspectorModal.vue`](file:///home/ellol/apps/agent-token-tracker/src/components/TurnInspectorModal.vue)), each interaction turn is analyzed for:
-- **Payload Ratio**: Fresh vs cached tokens.
-- **Noise Spikes**: Large tool results (`>25,000` chars) or un-cached input additions (`>15,000` tokens).
-- **Tool Churn**: Multi-tool sequential executions.
+Instead of manually editing files or re-prompting from scratch, the **Agent Token Tracker** adopts a dedicated **`docs/` Issue Handoff Pattern**:
 
-### B. Batch Issue Post-Mortem Generator (`📑 Generate docs/ Issues`)
-Clicking the header button automatically filters the session for heavy/problematic turns and writes structured Markdown post-mortem files to:
-```
-docs/tokens-consumptions/issues/issue-turn-<turnNumber>-<sessionIdPrefix>.md
+```mermaid
+graph LR
+    A["Tracker Detects Inefficiency (Turn Spikes / Optimizer Recs)"] --> B["Generates docs/tokens-consumptions/issues/issue-*.md"]
+    B --> C["Developer Copies Agent Kickoff Prompt"]
+    C --> D["Project Agent (Codex / Antigravity / Claude Code) Takes Over"]
+    D --> E["Autonomous Execution: Inspects Issue Doc ➔ Updates AGENTS.md / Scripts ➔ Verifies"]
 ```
 
-Each generated issue report contains:
-1. **Telemetry Snapshot**: Token breakdown (`In`, `Cache`, `Think`, `Out`), duration, and tool count.
-2. **Root Cause Analysis**: Explaining why the turn became heavy (e.g. unconstrained file read, verbose test run).
-3. **Prescriptive Agent Prompt**: A copy-pasteable instruction for an AI agent to fix the inefficiency following progressive disclosure principles.
+### A. Structure of an Agent Work Order (`issue-*.md`)
+Every generated markdown file contains:
+1. **🤖 Kickoff Prompt**: A ready-to-use prompt linking `@docs/tokens-consumptions/issues/issue-*.md` with explicit task boundaries.
+2. **📊 Telemetry Snapshot**: Exact numbers for `In`, `Cache`, `Think`, `Out`, duration, and tool count.
+3. **🚨 Root Cause & Anti-Pattern Analysis**: Explains the exact mechanism of waste (unconstrained reads, verbose test dumps).
+4. **🛠️ Step-by-Step Resolution Plan**: Precise file targets (`AGENTS.md`, `package.json`), rule text snippets, and silent test commands.
+5. **❌ / ✅ Bad vs. Good Code Examples**: Concrete syntax examples for progressive disclosure.
+
+---
+
+## 3. Issue Generation Points Across the App
+
+1. **Turn Inspector Header (`📑 Generate docs/ Issues`)**:
+   - Scans the active thread and generates issue work orders for all heavy/spiky turns in one batch.
+2. **Turn Inspector Individual Turns (`📑 Generate Issue`)**:
+   - Creates a dedicated work order for a single selected interaction turn.
+3. **Guided Optimization Recommendations (`📑 Generate Agent Issue Doc`)**:
+   - Converts any recommendation (Action 1–3) into an issue work order ready for agent takeover.
+4. **Header Issue Manager (`📋 Issues (docs/)`)**:
+   - Displays all active issue work orders in the project.
+   - Provides 1-click **"Copy Agent Handoff Prompt"**, markdown preview, and issue cleanup.
