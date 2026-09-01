@@ -10,7 +10,27 @@ const props = defineProps({
   sessions: {
     type: Array,
     default: () => []
+  },
+  activeAgent: {
+    type: String,
+    default: 'codex'
+  },
+  activeWorkspace: {
+    type: String,
+    default: 'all'
   }
+});
+
+const isAntigravity = computed(() => props.activeAgent === 'antigravity');
+
+const scopeLabel = computed(() => {
+  const agentLabel = isAntigravity.value ? 'Antigravity' : 'Codex';
+  const count = props.sessions.length;
+  if (!props.activeWorkspace || props.activeWorkspace === 'all') {
+    return `${agentLabel} • All Projects (${count} session${count === 1 ? '' : 's'})`;
+  }
+  const folder = props.activeWorkspace.split(/[\/\\]/).filter(Boolean).pop() || props.activeWorkspace;
+  return `${agentLabel} • ${folder} (${count} session${count === 1 ? '' : 's'})`;
 });
 
 // Non-overlapping token quantities:
@@ -70,14 +90,18 @@ const dailyUsage = computed(() => {
     <div class="chart-card card">
       <div class="chart-head">
         <div class="title-wrap">
-          <h4>Token Composition Breakdown</h4>
+          <h4>{{ isAntigravity ? '🌌 Antigravity Token Composition Breakdown' : 'Token Composition Breakdown' }}</h4>
           <Tooltip 
             title="Token Type Distribution" 
-            text="Visual breakdown of how your tokens are split between Cached Prompt Input, Fresh Input, Model Reasoning (Thinking), and Standard Output." 
-            why-it-matters="A high Cached Input percentage means OpenAI cache is giving you an 80% discount on prompt input."
+            :text="isAntigravity 
+              ? 'Visual breakdown of Antigravity Gemini tokens between Cached Context, Fresh Uncached Input, Model Reasoning (Thinking), and Generated Code/Output.' 
+              : 'Visual breakdown of how your tokens are split between Cached Prompt Input, Fresh Input, Model Reasoning (Thinking), and Standard Output.'" 
+            :why-it-matters="isAntigravity 
+              ? 'Context caching preserves prompt history across turns and speeds up subagent responses.' 
+              : 'A high Cached Input percentage means OpenAI cache is giving you an 80% discount on prompt input.'"
           />
         </div>
-        <span class="mono text-muted text-xs">All Recorded Sessions</span>
+        <span class="mono text-muted text-xs scope-pill" :class="{ 'pill-antigravity': isAntigravity }">{{ scopeLabel }}</span>
       </div>
 
       <!-- Segmented Track (with min-width for small slices so Reasoning is always clearly visible) -->
@@ -109,8 +133,9 @@ const dailyUsage = computed(() => {
         <div class="legend-item">
           <span class="legend-dot dot-cached"></span>
           <div class="legend-texts">
-            <span class="legend-label">Cached Input (80% Off)</span>
+            <span class="legend-label">{{ isAntigravity ? 'Cached Context Input' : 'Cached Input (80% Off)' }}</span>
             <span class="legend-val mono text-green">{{ cachedTokens.toLocaleString() }} ({{ formatPct(cachedTokens) }})</span>
+
           </div>
         </div>
 
@@ -140,9 +165,10 @@ const dailyUsage = computed(() => {
       </div>
 
       <!-- Quick Reasoning Share Callout -->
-      <div class="reasoning-share-bar">
+      <div class="reasoning-share-bar" :class="{ 'reasoning-share-antigravity': isAntigravity }">
         <span>🧠 <strong>Reasoning Effort Share:</strong> Reasoning accounts for <strong>{{ reasoningShareOfOutput }}%</strong> of all generated model output ({{ reasoningTokens.toLocaleString() }} of {{ (overview?.totalOutput || 0).toLocaleString() }} tokens).</span>
       </div>
+
     </div>
 
     <!-- Chart 2: Daily Token Burn Timeline -->
@@ -324,4 +350,24 @@ const dailyUsage = computed(() => {
 .text-blue { color: var(--accent-blue); }
 .text-purple { color: var(--accent-purple); }
 .text-yellow { color: var(--accent-yellow); }
+
+.scope-pill {
+  font-size: 0.72rem;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+}
+
+.pill-antigravity {
+  color: #c084fc;
+  background: rgba(168, 85, 247, 0.12);
+  border-color: rgba(168, 85, 247, 0.3);
+}
+
+.reasoning-share-antigravity {
+  background: rgba(168, 85, 247, 0.08);
+  border-color: rgba(168, 85, 247, 0.25);
+}
 </style>
+

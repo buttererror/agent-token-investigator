@@ -150,7 +150,13 @@ onMounted(() => {
       <MetricsOverview :overview="filteredOverview" :sessions="filteredSessions" />
 
       <!-- Token Burn Velocity Chart -->
-      <TokenBurnChart :overview="filteredOverview" :sessions="filteredSessions" />
+      <TokenBurnChart 
+        :overview="filteredOverview" 
+        :sessions="filteredSessions" 
+        :active-agent="activeAgent"
+        :active-workspace="activeWorkspace"
+      />
+
 
       <!-- Guided Optimizer & What-If Action Selector -->
       <GuidedOptimizer 
