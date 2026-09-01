@@ -20,22 +20,25 @@ const props = defineProps({
 const isAntigravity = computed(() => props.activeAgent === 'antigravity');
 
 const primaryUsed = computed(() => {
-  return props.rateLimits?.primary?.used_percent ?? (isAntigravity.value ? 18 : 0);
+  return props.rateLimits?.primary?.used_percent ?? 0;
 });
 
 const secondaryUsed = computed(() => {
-  return props.rateLimits?.secondary?.used_percent ?? (isAntigravity.value ? 12 : 0);
+  return props.rateLimits?.secondary?.used_percent ?? 0;
 });
+
+const quotaAvailable = computed(() => props.pacingForecast?.quotaAvailable !== false);
 
 const planType = computed(() => {
   if (isAntigravity.value) {
-    return (props.rateLimits?.plan_type || 'Antigravity Free Tier').toUpperCase();
+    return quotaAvailable.value ? (props.rateLimits?.plan_type || 'ANTIGRAVITY').toUpperCase() : 'LOCAL ACTIVITY ONLY';
   }
   return (props.rateLimits?.plan_type || 'Plus').toUpperCase();
 });
 
 const resetTimeFormatted = computed(() => {
-  const mins = props.pacingForecast?.minutesUntilReset ?? (isAntigravity.value ? 70 : 0);
+  const mins = props.pacingForecast?.minutesUntilReset;
+  if (!Number.isFinite(mins)) return 'Unavailable';
   const hours = Math.floor(mins / 60);
   const remainingMins = mins % 60;
   if (hours > 0) return `${hours}h ${remainingMins}m`;
@@ -44,6 +47,7 @@ const resetTimeFormatted = computed(() => {
 
 const pacingStatusBadge = computed(() => {
   const status = props.pacingForecast?.status;
+  if (status === 'UNAVAILABLE') return { type: 'muted', text: 'Local Estimate' };
   if (status === 'CRITICAL') return { type: 'red', text: '⚠️ High Risk' };
   if (status === 'WARNING') return { type: 'yellow', text: '⚡ Rapid Burn' };
   return { type: 'green', text: '🟢 Sustainable' };
@@ -84,7 +88,7 @@ const barColorPrimary = computed(() => {
       <div class="meter-block">
         <div class="meter-labels">
           <div class="meter-title-wrap">
-            <span class="meter-label">{{ isAntigravity ? '5-Hour Rate Limit Window (Gemini Flash/Pro)' : '5-Hour Rate Limit Window' }}</span>
+            <span class="meter-label">{{ !quotaAvailable ? 'Live Provider Quota' : (isAntigravity ? '5-Hour Rate Limit Window (Gemini Flash/Pro)' : '5-Hour Rate Limit Window') }}</span>
             <Tooltip 
               title="5-Hour Rolling Window" 
               :text="isAntigravity 
@@ -93,28 +97,30 @@ const barColorPrimary = computed(() => {
               why-it-matters="When this hits 100%, requests will be rejected until the timer rolls forward."
             />
           </div>
-          <span class="meter-value mono" :style="{ color: barColorPrimary }">
+          <span v-if="quotaAvailable" class="meter-value mono" :style="{ color: barColorPrimary }">
             {{ primaryUsed }}% Used
           </span>
+          <span v-else class="meter-value mono text-muted">Unavailable</span>
         </div>
-        <div class="progress-track">
+        <div v-if="quotaAvailable" class="progress-track">
           <div 
             class="progress-fill" 
             :style="{ width: `${primaryUsed}%`, backgroundColor: barColorPrimary }"
           ></div>
         </div>
+        <div v-else class="quota-unavailable">Transcript logs do not contain provider quota balances or reset times.</div>
         <div class="meter-footer">
           <span class="countdown-text">
-            ⏳ Resets in <strong class="mono">{{ resetTimeFormatted }}</strong>
+            ⏳ {{ quotaAvailable ? `Resets in ${resetTimeFormatted}` : 'No reset timestamp available' }}
           </span>
           <span class="velocity-text mono">
-            🔥 {{ (pacingForecast?.burnRatePerMin || 0).toLocaleString() }} tok/min
+            🔥 ~{{ (pacingForecast?.burnRatePerMin || 0).toLocaleString() }} local tok/min
           </span>
         </div>
       </div>
 
       <!-- Weekly Rolling Limit -->
-      <div class="meter-block">
+      <div v-if="quotaAvailable" class="meter-block">
         <div class="meter-labels">
           <div class="meter-title-wrap">
             <span class="meter-label">{{ isAntigravity ? 'Weekly Rolling Quota' : 'Weekly Rolling Limit' }}</span>
@@ -269,6 +275,15 @@ const barColorPrimary = computed(() => {
   font-size: 0.85rem;
 }
 
+.quota-unavailable {
+  min-height: 10px;
+  padding: 10px 12px;
+  border: 1px dashed rgba(168, 85, 247, 0.45);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
 .banner-antigravity {
   background-color: rgba(168, 85, 247, 0.08);
   border-color: rgba(168, 85, 247, 0.25);
@@ -288,4 +303,3 @@ const barColorPrimary = computed(() => {
   color: var(--text-main);
 }
 </style>
-

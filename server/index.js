@@ -116,8 +116,10 @@ app.get('/api/pacing-forecast', async (req, res) => {
         return cwd.startsWith(target) || target.startsWith(cwd);
       });
     }
-    const overview = await getOverviewMetrics(sessions);
-    const forecast = calculatePacingForecast(overview.latestRateLimit, sessions);
+    // getOverviewMetrics supplies a Codex-shaped fallback for generic metrics.
+    // Pacing must use only a provider snapshot that was actually ingested.
+    const rateLimits = sessions.find(session => session.rateLimits)?.rateLimits ?? null;
+    const forecast = calculatePacingForecast(rateLimits, sessions);
     res.json(forecast);
   } catch (err) {
     res.status(500).json({ error: err.message });

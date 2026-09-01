@@ -38,6 +38,44 @@ function formatToolSummary(toolCalls = []) {
 }
 
 /**
+ * Returns the safeguards that already exist in the target project so a work
+ * order does not instruct an agent to add the same configuration again.
+ */
+function inspectProjectControls(projectPath) {
+  const root = normalizeDir(projectPath);
+  const agentsPath = path.join(root, 'AGENTS.md');
+  const packagePath = path.join(root, 'package.json');
+  const agentsContent = fs.existsSync(agentsPath) ? fs.readFileSync(agentsPath, 'utf8') : '';
+  let scripts = {};
+
+  if (fs.existsSync(packagePath)) {
+    try {
+      scripts = JSON.parse(fs.readFileSync(packagePath, 'utf8')).scripts || {};
+    } catch {
+      // A malformed package file is a separate project issue; keep the work
+      // order useful instead of failing generation.
+    }
+  }
+
+  const quietTestScript = Object.entries(scripts).find(([, command]) => {
+    const text = String(command);
+    return /--bail(?:\s+|=)1/.test(text) && text.includes('--silent');
+  });
+
+  return {
+    hasProgressiveDisclosureRule: /progressive disclosure/i.test(agentsContent),
+    hasTestRunner: Object.keys(scripts).some((name) => name === 'test' || name.startsWith('test:')),
+    quietTestScript: quietTestScript ? quietTestScript[0] : null
+  };
+}
+
+function isQuietTestInvocation(toolCall, quietTestScript) {
+  const text = JSON.stringify(toolCall || '').toLowerCase();
+  const hasQuietFlags = text.includes('--silent') && /--bail(?:\s+|=)1/.test(text);
+  return hasQuietFlags || Boolean(quietTestScript && text.includes(quietTestScript.toLowerCase()));
+}
+
+/**
  * Generates an Autonomous Agent Work Order / Issue Doc for a specific turn
  */
 export function generateTurnIssueReport({ projectPath, session, turn }) {
@@ -55,9 +93,13 @@ export function generateTurnIssueReport({ projectPath, session, turn }) {
   const think = turn.tokenUsage?.reasoning_output_tokens || 0;
   const total = inp + out;
   const cacheHitRate = inp > 0 ? Math.round((cached / inp) * 100) : 0;
+  const projectControls = inspectProjectControls(projectPath);
 
   // Identify core problem categories
-  const hasTests = turn.toolCalls?.some(tc => JSON.stringify(tc || '').toLowerCase().includes('test'));
+  const testToolCalls = turn.toolCalls?.filter(tc => JSON.stringify(tc || '').toLowerCase().includes('test')) || [];
+  const hasNoisyTests = testToolCalls.length > 0 && testToolCalls.some(
+    (toolCall) => !isQuietTestInvocation(toolCall, projectControls.quietTestScript)
+  );
   const hasFileSpike = fresh > 25000;
   const hasHighThinking = think > 1200;
   const hasManyTools = (turn.toolCalls?.length || 0) >= 4;
@@ -69,23 +111,43 @@ export function generateTurnIssueReport({ projectPath, session, turn }) {
   let badExample = 'Running unconstrained file reads or unbounded searches without line ranges.';
   let goodExample = 'Using grep_search with StartLine/EndLine slices or targeted symbol inspection.';
   let resolutionRules = `- Practice progressive disclosure: always inspect targeted line ranges (StartLine/EndLine) rather than reading entire files into prompt context.`;
+  let targetFiles = '[AGENTS.md](AGENTS.md)';
+  let verificationCommand = projectControls.hasTestRunner
+    ? 'npm run test:agent || npm test -- --bail 1 --silent'
+    : 'npm run build';
 
-  if (hasTests) {
+  if (hasNoisyTests) {
     problemHeadline = 'Unfiltered Test Suite Console Noise';
     problemDetails = `Executed test commands without bail or silent flags, dumping raw passing logs and stack traces (~${inp.toLocaleString()} tokens).`;
     projectedSavingsTokens = Math.round(inp * 0.95);
-    recommendedAction = 'Add a quiet test runner script in package.json and instruct agent in AGENTS.md';
+    recommendedAction = projectControls.quietTestScript
+      ? `Use the existing ${projectControls.quietTestScript} quiet test script`
+      : 'Add a quiet test runner script in package.json and instruct agent in AGENTS.md';
     badExample = '```bash\npnpm test\n# Dumps dozens of passing test logs into prompt context\n```';
     goodExample = '```bash\npnpm test -- --bail 1 --silent\n# Halts on first error, output payload < 400 tokens\n```';
-    resolutionRules = `- When executing test suites, always pass \`--bail 1\` and \`--silent\` to keep context lean.\n- Add \`"test:agent": "vitest run --bail 1 --silent"\` to \`package.json\`.`;
+    targetFiles = projectControls.quietTestScript
+      ? '[AGENTS.md](AGENTS.md)'
+      : '[AGENTS.md](AGENTS.md) and [package.json](package.json)';
+    resolutionRules = projectControls.quietTestScript
+      ? `- Use \`npm run ${projectControls.quietTestScript}\` for test verification instead of invoking the full suite directly.\n- Keep \`--bail 1\` and \`--silent\` when a direct runner command is necessary.`
+      : `- When executing test suites, always pass \`--bail 1\` and \`--silent\` to keep context lean.\n- Add a \`test:agent\` script only by adapting the project's existing test runner; do not assume Vitest is installed.`;
+    verificationCommand = projectControls.quietTestScript
+      ? `npm run ${projectControls.quietTestScript}`
+      : projectControls.hasTestRunner
+        ? 'npm test -- --bail 1 --silent'
+        : 'npm run build';
   } else if (hasFileSpike) {
     problemHeadline = 'Full-File Reading Instead of Targeted Line Slices';
     problemDetails = `Loaded entire file contents into prompt context rather than using progressive disclosure with line ranges.`;
     projectedSavingsTokens = Math.round(fresh * 0.9);
-    recommendedAction = 'Enforce progressive disclosure with StartLine/EndLine in AGENTS.md';
+    recommendedAction = projectControls.hasProgressiveDisclosureRule
+      ? 'Apply the existing progressive-disclosure rule during the next investigation'
+      : 'Enforce progressive disclosure with StartLine/EndLine in AGENTS.md';
     badExample = '```bash\nview_file /path/to/LargeFile.js\n# Reads entire 800+ lines into context\n```';
     goodExample = '```bash\ngrep_search query: "targetSymbol" + view_file StartLine: 40 EndLine: 85\n# Reads only 45 relevant lines\n```';
-    resolutionRules = `- Practice progressive disclosure: always inspect targeted line ranges (\`StartLine\`/\`EndLine\`) rather than reading entire files into prompt context.\n- Never read files over 200 lines in full when making localized edits.`;
+    resolutionRules = projectControls.hasProgressiveDisclosureRule
+      ? `- The project already requires progressive disclosure. Apply that existing rule by searching for the target symbol before reading a narrow line range.\n- Do not duplicate the rule in \`AGENTS.md\`; record the observed workflow correction in the handoff instead.`
+      : `- Practice progressive disclosure: always inspect targeted line ranges (\`StartLine\`/\`EndLine\`) rather than reading entire files into prompt context.\n- Never read files over 200 lines in full when making localized edits.`;
   } else if (hasManyTools) {
     problemHeadline = 'Dense Multi-Step Tool Execution Carryover';
     problemDetails = `Executed ${turn.toolCalls.length} distinct tool calls in a single conversational turn, inflating turn payload.`;
@@ -94,9 +156,10 @@ export function generateTurnIssueReport({ projectPath, session, turn }) {
     badExample = 'Prompting multi-phase architectural chores across sequential tool calls in a single unbounded turn.';
     goodExample = 'Packaging the verification sequence into a modular `.agents/skills/verify-slice/SKILL.md` skill.';
     resolutionRules = `- Package repetitive multi-turn test/lint workflows into modular \`.agents/skills/\` with \`allow_implicit_invocation: false\`.`;
+    targetFiles = 'the relevant workflow under [.agents/skills/](.agents/skills/)';
   }
 
-  const agentPrompt = `Please inspect and resolve the token inefficiency documented in @docs/tokens-consumptions/issues/${fileName}. Apply the recommended rules to AGENTS.md or package.json, verify with silent flags, and ensure all changes preserve documentation integrity.`;
+  const agentPrompt = `Please inspect and resolve the token inefficiency documented in @docs/tokens-consumptions/issues/${fileName}. Verify the listed project controls first, implement only the smallest missing correction, and do not duplicate an existing rule or script.`;
 
   const markdownContent = `# 📋 Agent Work Order: Token Inefficiency Resolution
 > **Issue ID**: \`ISSUE-TURN-${turnNum}-${sessionShort}\`  
@@ -135,6 +198,8 @@ ${agentPrompt}
 ### 🚨 Problem: **${problemHeadline}**
 ${problemDetails}
 
+- **Recommended Action**: ${recommendedAction}
+
 ### 🔍 User Request in this Turn:
 > *${turn.userPrompt ? String(turn.userPrompt).replace(/\n/g, ' ') : 'No user prompt recorded.'}*
 
@@ -155,19 +220,19 @@ ${formatToolSummary(turn.toolCalls)}
 
 When an agent takes over this task, execute these exact steps:
 
-1. **Step 1: Inspect Target Configuration Files**:
-   - Inspect [AGENTS.md](AGENTS.md) and [package.json](package.json) using line slices.
+1. **Step 1: Inspect the Relevant Project Controls**:
+   - Inspect ${targetFiles} using line slices.
 
 2. **Step 2: Apply Optimization Rule**:
-   - Add the following convention to [AGENTS.md](AGENTS.md) under a \`## Token Optimization Rules\` section:
+   - Apply the following convention only if it is not already enforced by the project:
 \`\`\`markdown
 ${resolutionRules}
 \`\`\`
 
 3. **Step 3: Verification**:
-   - Run the project test suite using silent flags to verify no regressions:
+   - Run the narrowest available validation command:
 \`\`\`bash
-npm run test:agent || npm test -- --bail 1 --silent
+${verificationCommand}
 \`\`\`
 
 ---
@@ -359,4 +424,3 @@ export function saveTokenIssue(projectPath, fileName, content) {
   fs.writeFileSync(fullPath, content, 'utf8');
   return true;
 }
-

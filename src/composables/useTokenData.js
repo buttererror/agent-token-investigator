@@ -99,13 +99,7 @@ export function useTokenData() {
     }
 
     if (!latestRate) {
-      if (activeAgent.value === 'antigravity') {
-        latestRate = {
-          primary: { used_percent: 18, window_minutes: 300, resets_at: Date.now() / 1000 + 4200 },
-          secondary: { used_percent: 12, window_minutes: 10080, resets_at: Date.now() / 1000 + 345600 },
-          plan_type: 'Antigravity Free Tier'
-        };
-      } else {
+      if (activeAgent.value !== 'antigravity') {
         latestRate = overview.value?.latestRateLimit || {
           primary: { used_percent: 0, window_minutes: 300, resets_at: Date.now() / 1000 + 18000 },
           secondary: { used_percent: 0, window_minutes: 10080, resets_at: Date.now() / 1000 + 604800 },
@@ -131,21 +125,42 @@ export function useTokenData() {
   });
 
   const filteredPacingForecast = computed(() => {
-    const rateLimits = filteredOverview.value?.latestRateLimit || overview.value?.latestRateLimit;
+    const rateLimits = filteredOverview.value?.latestRateLimit || (
+      activeAgent.value === 'antigravity' ? null : overview.value?.latestRateLimit
+    );
     const list = filteredSessions.value || [];
     
-    const primary = rateLimits?.primary || { used_percent: 0, resets_at: Date.now() / 1000 + 18000 };
-    const usedPercent = primary.used_percent || 0;
-    const resetsAt = primary.resets_at || (Date.now() / 1000 + 18000);
+    const primary = rateLimits?.primary;
+    const quotaAvailable = Number.isFinite(primary?.used_percent) && Number.isFinite(primary?.resets_at);
+    const usedPercent = quotaAvailable ? primary.used_percent : null;
+    const resetsAt = quotaAvailable ? primary.resets_at : null;
     const nowSec = Date.now() / 1000;
-    const minutesUntilReset = Math.max(Math.round((resetsAt - nowSec) / 60), 0);
+    const minutesUntilReset = quotaAvailable ? Math.max(Math.round((resetsAt - nowSec) / 60), 0) : null;
 
-    // Calculate burn velocity from sessions in current filter
+    // Estimate local activity from transcript turns in the last two hours.
     let recentTokens = 0;
-    for (const s of list.slice(0, 5)) {
-      recentTokens += s.totalUsage?.total_tokens || 0;
+    const twoHoursAgo = nowSec - (2 * 60 * 60);
+    for (const session of list) {
+      for (const turn of session.turns || []) {
+        const timestamp = Date.parse(turn.startedAt) / 1000;
+        if (Number.isFinite(timestamp) && timestamp >= twoHoursAgo) {
+          recentTokens += turn.tokenUsage?.total_tokens || 0;
+        }
+      }
     }
-    const burnRatePerMin = Math.round(recentTokens / 120) || (activeAgent.value === 'antigravity' ? 350 : 1200);
+    const burnRatePerMin = Math.round(recentTokens / 120);
+
+    if (!quotaAvailable) {
+      return {
+        quotaAvailable: false,
+        usedPercent: null,
+        minutesUntilReset: null,
+        burnRatePerMin,
+        minutesUntilExhaustion: null,
+        status: 'UNAVAILABLE',
+        advice: 'Live provider quota is unavailable in Antigravity transcript logs. Local activity is estimated from the last two hours only.'
+      };
+    }
 
     const remainingPercent = 100 - usedPercent;
     const minutesUntilExhaustion = remainingPercent > 0 
@@ -166,6 +181,7 @@ export function useTokenData() {
     }
 
     return {
+      quotaAvailable: true,
       usedPercent,
       minutesUntilReset,
       burnRatePerMin,

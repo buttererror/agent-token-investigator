@@ -1,0 +1,7 @@
+interface:
+  display_name: "Token Verification Slice"
+  short_description: "Run focused, low-noise project validation"
+  default_prompt: "Use $token-verification-slice to validate the current change with minimal output."
+
+policy:
+  allow_implicit_invocation: true

@@ -451,23 +451,43 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
  * Calculates live burn velocity and rate-limit pacing forecast
  */
 export function calculatePacingForecast(rateLimits, sessions) {
-  const primary = rateLimits?.primary || { used_percent: 0, resets_at: Date.now() / 1000 + 18000 };
-  const usedPercent = primary.used_percent || 0;
-  const resetsAt = primary.resets_at || (Date.now() / 1000 + 18000);
+  const primary = rateLimits?.primary;
+  const quotaAvailable = Number.isFinite(primary?.used_percent) && Number.isFinite(primary?.resets_at);
+  const usedPercent = quotaAvailable ? primary.used_percent : null;
+  const resetsAt = quotaAvailable ? primary.resets_at : null;
   const nowSec = Date.now() / 1000;
-  const minutesUntilReset = Math.max(Math.round((resetsAt - nowSec) / 60), 0);
+  const minutesUntilReset = quotaAvailable ? Math.max(Math.round((resetsAt - nowSec) / 60), 0) : null;
 
-  // Estimate burn rate from recent turns in the last 2 hours
+  // Local activity estimate from transcript turns seen in the last two hours.
+  // This must not be presented as a provider quota measurement.
   let recentTokens = 0;
-  for (const s of sessions.slice(0, 5)) {
-    recentTokens += s.totalUsage?.total_tokens || 0;
+  const twoHoursAgo = nowSec - (2 * 60 * 60);
+  for (const session of sessions) {
+    for (const turn of session.turns || []) {
+      const timestamp = Date.parse(turn.startedAt) / 1000;
+      if (Number.isFinite(timestamp) && timestamp >= twoHoursAgo) {
+        recentTokens += turn.tokenUsage?.total_tokens || 0;
+      }
+    }
   }
-  const burnRatePerMin = Math.round(recentTokens / 120) || 1200;
+  const burnRatePerMin = Math.round(recentTokens / 120);
+
+  if (!quotaAvailable) {
+    return {
+      quotaAvailable: false,
+      usedPercent: null,
+      minutesUntilReset: null,
+      burnRatePerMin,
+      minutesUntilExhaustion: null,
+      status: 'UNAVAILABLE',
+      advice: 'Live provider quota is unavailable in Antigravity transcript logs. Local activity is estimated from the last two hours only.'
+    };
+  }
 
   // Minutes until 100% capacity at current pace
   const remainingPercent = 100 - usedPercent;
   const minutesUntilExhaustion = remainingPercent > 0 
-    ? Math.round((remainingPercent / 100) * (250000 / Math.max(burnRatePerMin, 500)))
+    ? Math.round((remainingPercent / 100) * (250000 / Math.max(burnRatePerMin, 1)))
     : 0;
 
   let status = 'HEALTHY';
@@ -482,6 +502,7 @@ export function calculatePacingForecast(rateLimits, sessions) {
   }
 
   return {
+    quotaAvailable: true,
     usedPercent,
     minutesUntilReset,
     burnRatePerMin,

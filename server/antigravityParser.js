@@ -244,24 +244,10 @@ export async function parseAntigravitySessionFile(sessionId, logPath) {
         reasoningEffort: modelName.includes('Low') ? 'low' : (modelName.includes('High') ? 'high' : 'medium'),
         timestamp: lastTimestamp
       },
-      latestRateLimit: {
-        rollingUsage5h: 0.18, // Normal healthy baseline
-        rolling5hCap: 250000,
-        secondsUntil5hReset: 4200
-      },
-      rateLimits: {
-        primary: {
-          used_percent: 18,
-          window_minutes: 300,
-          resets_at: Math.round(Date.now() / 1000 + 4200)
-        },
-        secondary: {
-          used_percent: 12,
-          window_minutes: 10080,
-          resets_at: Math.round(Date.now() / 1000 + 345600)
-        },
-        plan_type: 'Antigravity Free Tier'
-      },
+      // Transcript logs contain activity, not provider quota snapshots. Never
+      // manufacture percentages, reset times, or plan limits from estimates.
+      latestRateLimit: null,
+      rateLimits: null,
       totalUsage,
       turns
     };

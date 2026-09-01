@@ -24,6 +24,7 @@ const {
   sessions,
   filteredSessions,
   pacingForecast,
+  filteredPacingForecast,
   glossary,
   projects,
   guidanceRecords,
@@ -140,7 +141,7 @@ onMounted(() => {
     <main v-if="!isLoading">
       <!-- Action 7: Rate Limits & Quota Meter -->
       <RateLimitMeter 
-        :rate-limits="filteredOverview?.latestRateLimit || overview?.latestRateLimit"
+        :rate-limits="filteredOverview?.latestRateLimit || (activeAgent === 'antigravity' ? null : overview?.latestRateLimit)"
         :pacing-forecast="filteredPacingForecast || pacingForecast"
         :active-agent="activeAgent"
       />
