@@ -449,14 +449,21 @@ function formatToolArg(input) {
           <span class="session-path mono text-dim text-xs">{{ session?.meta?.cwd || '' }} • {{ session?.sessionId }}</span>
         </div>
         <div class="head-actions">
-          <button 
-            class="btn btn-secondary btn-sm"
-            :disabled="isGeneratingAllIssues"
-            @click="handleGenerateAllIssues"
-            title="Generate structured issue reports in docs/token-consumption/issues/ for all heavy turns"
-          >
-            <span>📑</span> {{ isGeneratingAllIssues ? 'Generating Issues...' : 'Generate docs/ Issues' }}
-          </button>
+          <div class="action-btn-group">
+            <button 
+              class="btn btn-secondary btn-sm"
+              :disabled="isGeneratingAllIssues"
+              @click="handleGenerateAllIssues"
+            >
+              <span>📑</span> {{ isGeneratingAllIssues ? 'Generating Issues...' : 'Generate docs/ Issues' }}
+            </button>
+            <Tooltip
+              placement="bottom"
+              title="Batch Issue Report Generator"
+              text="Scans this session and automatically generates detailed Markdown issue reports in docs/tokens-consumptions/issues/ for heavy turns (>15k fresh un-cached tokens, noise spikes, or >=3 tool calls)."
+              whyItMatters="Creates actionable post-mortem files with copy-pasteable instructions and rules to help agents follow progressive disclosure."
+            />
+          </div>
           <button 
             class="btn btn-primary btn-sm"
             @click="$emit('export-handoff', session)"
@@ -470,19 +477,51 @@ function formatToolArg(input) {
       <!-- Quick Session Stats Bar -->
       <div class="stats-summary-bar">
         <div class="summary-item">
-          <span class="lbl">Total Turns:</span>
+          <span class="lbl">
+            Total Turns
+            <Tooltip
+              placement="bottom"
+              title="Session Turns"
+              text="The number of back-and-forth user/agent interaction cycles in this thread."
+              whyItMatters="Longer threads (>15-20 turns) cause quadratic input token inflation as context history is re-sent."
+            />:
+          </span>
           <span class="val mono">{{ session?.turnCount || 0 }}</span>
         </div>
         <div class="summary-item">
-          <span class="lbl">Total Tokens:</span>
+          <span class="lbl">
+            Total Tokens
+            <Tooltip
+              placement="bottom"
+              title="Total Tokens"
+              text="Sum of all input, cached, reasoning, and output tokens consumed across all turns in this session."
+              whyItMatters="Represents the overall compute volume and cost footprint of this conversation."
+            />:
+          </span>
           <span class="val mono">{{ (session?.totalUsage?.total_tokens || 0).toLocaleString() }}</span>
         </div>
         <div class="summary-item">
-          <span class="lbl">Cache Hit Rate:</span>
+          <span class="lbl">
+            Cache Hit Rate
+            <Tooltip
+              placement="bottom"
+              title="Prompt Cache Hit Rate"
+              text="Percentage of input tokens served directly from prompt cache instead of being processed freshly."
+              whyItMatters="A high cache rate (>75%) delivers lower latency and substantial cost savings on model pricing."
+            />:
+          </span>
           <span class="val mono text-green">{{ cacheRate }}%</span>
         </div>
         <div class="summary-item">
-          <span class="lbl">Reasoning (Thinking):</span>
+          <span class="lbl">
+            Reasoning (Thinking)
+            <Tooltip
+              placement="bottom"
+              title="Reasoning Tokens"
+              text="Tokens spent on internal model deliberation before emitting output."
+              whyItMatters="Reasoning tokens count toward output token quotas; use lower reasoning effort for routine chores."
+            />:
+          </span>
           <span class="val mono text-purple">{{ (session?.totalUsage?.reasoning_output_tokens || 0).toLocaleString() }}</span>
         </div>
       </div>
@@ -621,13 +660,41 @@ function formatToolArg(input) {
 
               <!-- Per Turn Token Breakdown -->
               <div v-if="turn.tokenUsage" class="turn-tokens-pill mono">
-                <span title="Total Input">In: {{ (turn.tokenUsage.input_tokens || 0).toLocaleString() }}</span>
+                <Tooltip 
+                  placement="top"
+                  title="Total Input Tokens (In)"
+                  text="Total tokens sent to the model for this turn, including system instructions, workspace rules (AGENTS.md), full prior context history, and tool execution outputs."
+                  whyItMatters="Input tokens accumulate across turns, making long threads costlier on every step."
+                >
+                  <span class="token-item-lbl" title="Total Input">In: {{ (turn.tokenUsage.input_tokens || 0).toLocaleString() }}</span>
+                </Tooltip>
                 <span class="sep">•</span>
-                <span class="text-green" title="Cached Tokens">Cache: {{ (turn.tokenUsage.cached_input_tokens || 0).toLocaleString() }}</span>
+                <Tooltip 
+                  placement="top"
+                  title="Cached Input Tokens (Cache)"
+                  text="Portion of input tokens retrieved directly from prompt cache instead of being processed freshly."
+                  whyItMatters="Cached tokens cost up to 75-90% less than fresh input tokens."
+                >
+                  <span class="token-item-lbl text-green" title="Cached Tokens">Cache: {{ (turn.tokenUsage.cached_input_tokens || 0).toLocaleString() }}</span>
+                </Tooltip>
                 <span class="sep">•</span>
-                <span class="text-purple" title="Reasoning Tokens">Think: {{ (turn.tokenUsage.reasoning_output_tokens || 0).toLocaleString() }}</span>
+                <Tooltip 
+                  placement="top"
+                  title="Reasoning Tokens (Think)"
+                  text="Internal chain-of-thought tokens generated by the model before producing the final response."
+                  whyItMatters="Counts against output quotas; use low reasoning effort for standard chores and file edits."
+                >
+                  <span class="token-item-lbl text-purple" title="Reasoning Tokens">Think: {{ (turn.tokenUsage.reasoning_output_tokens || 0).toLocaleString() }}</span>
+                </Tooltip>
                 <span class="sep">•</span>
-                <span title="Output Tokens">Out: {{ (turn.tokenUsage.output_tokens || 0).toLocaleString() }}</span>
+                <Tooltip 
+                  placement="top"
+                  title="Output Tokens (Out)"
+                  text="Tokens generated by the model in its response, including text explanations, code edits, and tool invocations."
+                  whyItMatters="Output tokens are billed at higher rates; keep outputs lean with targeted file replacements."
+                >
+                  <span class="token-item-lbl" title="Output Tokens">Out: {{ (turn.tokenUsage.output_tokens || 0).toLocaleString() }}</span>
+                </Tooltip>
               </div>
             </div>
           </div>
@@ -717,19 +784,26 @@ function formatToolArg(input) {
                 </div>
               </div>
 
-              <!-- Action: Generate Structured Issue in docs/token-consumption/issues/ -->
+              <!-- Action: Generate Structured Issue in docs/tokens-consumptions/issues/ -->
               <div class="turn-action-row">
-                <button
-                  :disabled="generatedIssues[turn.turnNumber]?.status === 'generating'"
-                  :class="['btn-turn-action', { 'is-applied': generatedIssues[turn.turnNumber]?.status === 'success' }]"
-                  @click="handleGenerateTurnIssue(turn)"
-                  title="Generate a structured markdown issue report inside docs/token-consumption/issues/ with context and examples for an AI agent"
-                >
-                  <span class="btn-action-badge">Docs Issue</span>
-                  <span class="btn-action-text">📄 Generate Issue Report in docs/</span>
-                  <span v-if="generatedIssues[turn.turnNumber]?.status === 'generating'" class="spinner-inline">⏳ Writing .md...</span>
-                  <span v-else-if="generatedIssues[turn.turnNumber]?.status === 'success'" class="text-green">✅ Saved Issue</span>
-                </button>
+                <div class="turn-issue-btn-wrap">
+                  <button
+                    :disabled="generatedIssues[turn.turnNumber]?.status === 'generating'"
+                    :class="['btn-turn-action', { 'is-applied': generatedIssues[turn.turnNumber]?.status === 'success' }]"
+                    @click="handleGenerateTurnIssue(turn)"
+                  >
+                    <span class="btn-action-badge">Docs Issue</span>
+                    <span class="btn-action-text">📄 Generate Issue Report in docs/</span>
+                    <span v-if="generatedIssues[turn.turnNumber]?.status === 'generating'" class="spinner-inline">⏳ Writing .md...</span>
+                    <span v-else-if="generatedIssues[turn.turnNumber]?.status === 'success'" class="text-green">✅ Saved Issue</span>
+                  </button>
+                  <Tooltip
+                    placement="top"
+                    title="Generate Single Turn Issue"
+                    text="Generates an individual Markdown issue post-mortem file in docs/tokens-consumptions/issues/ detailing the exact tool calls, token waste diagnosis, and recommended agent prompt remedies for this turn."
+                    whyItMatters="Provides targeted guidance and copy-pasteable prompts to fix patterns that caused spikes in this turn."
+                  />
+                </div>
 
                 <!-- Feedback for generated issue -->
                 <div v-if="generatedIssues[turn.turnNumber]?.status === 'success'" class="action-feedback-pill">
@@ -1052,6 +1126,18 @@ function formatToolArg(input) {
   font-size: 0.72rem;
 }
 
+.action-btn-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.turn-issue-btn-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .turn-efficiency-group {
   display: flex;
   align-items: center;
@@ -1065,7 +1151,24 @@ function formatToolArg(input) {
   padding: 3px 8px;
   border-radius: 6px;
   display: flex;
+  align-items: center;
   gap: 6px;
+}
+
+.turn-tokens-pill :deep(.tooltip-container) {
+  margin-left: 0;
+}
+
+.token-item-lbl {
+  cursor: help;
+  text-decoration: underline dotted rgba(255, 255, 255, 0.3);
+  text-underline-offset: 3px;
+  transition: all 0.15s ease;
+}
+
+.token-item-lbl:hover {
+  filter: brightness(1.25);
+  text-decoration-color: rgba(255, 255, 255, 0.7);
 }
 
 .turn-diagnosis-text {
