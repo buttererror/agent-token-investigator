@@ -2,6 +2,7 @@
 import { ref } from 'vue';
 import { useTokenData } from './composables/useTokenData.js';
 import HeaderNav from './components/HeaderNav.vue';
+import GlobalFilterBar from './components/GlobalFilterBar.vue';
 import RateLimitMeter from './components/RateLimitMeter.vue';
 import MetricsOverview from './components/MetricsOverview.vue';
 import TokenBurnChart from './components/TokenBurnChart.vue';
@@ -14,10 +15,15 @@ import ActionHandoffModal from './components/ActionHandoffModal.vue';
 import ActionSkillGeneratorModal from './components/ActionSkillGeneratorModal.vue';
 
 const {
+  rawOverview,
+  rawSessions,
   overview,
   sessions,
   diagnostics,
   diagnosticScope,
+  activeScopeMode,
+  activeScopeDate,
+  activeScopeSessionId,
   pacingForecast,
   glossary,
   isLoading,
@@ -59,6 +65,16 @@ function toggleRefresh() {
       @toggle-refresh="toggleRefresh"
       @open-guide="isGuideOpen = true"
       @open-linter="isLinterOpen = true"
+    />
+
+    <!-- Global State & Scope Filter Toolbar -->
+    <GlobalFilterBar 
+      :active-scope-mode="activeScopeMode"
+      :active-scope-date="activeScopeDate"
+      :active-scope-session-id="activeScopeSessionId"
+      :diagnostic-scope="diagnosticScope"
+      :all-sessions="rawSessions"
+      @change-scope="setScope"
     />
 
     <!-- Main Content -->
