@@ -15,7 +15,6 @@ import ActionHandoffModal from './components/ActionHandoffModal.vue';
 import ActionSkillGeneratorModal from './components/ActionSkillGeneratorModal.vue';
 import BenchmarkModal from './components/BenchmarkModal.vue';
 import GuidanceRecordsModal from './components/GuidanceRecordsModal.vue';
-import ProjectSelectorModal from './components/ProjectSelectorModal.vue';
 import AgentIssuesModal from './components/AgentIssuesModal.vue';
 
 const {
@@ -37,8 +36,6 @@ const {
   isAutoRefresh,
   setWorkspace,
   setAgent,
-  addProject,
-  removeProject,
   fetchGuidanceRecords,
   addGuidanceRecord,
   refresh
@@ -53,7 +50,6 @@ const isHandoffOpen = ref(false);
 const isSkillGenOpen = ref(false);
 const isBenchmarkOpen = ref(false);
 const isGuidanceRecordsOpen = ref(false);
-const isProjectSelectorOpen = ref(false);
 const isIssuesOpen = ref(false);
 const issuesCount = ref(0);
 const activeInspectSession = ref(null);
@@ -91,16 +87,6 @@ function handleAgentChange(newAgent) {
   setAgent(newAgent);
 }
 
-function handleProjectAdded(newProj) {
-  setWorkspace(newProj.path);
-  fetchIssuesCount(newProj.path);
-  refresh();
-}
-
-async function handleProjectRemoved(projPath) {
-  await removeProject(projPath);
-}
-
 async function handleAddGuidanceRecord(recordData) {
   await addGuidanceRecord(recordData);
   fetchIssuesCount(activeWorkspace.value);
@@ -132,7 +118,6 @@ onMounted(() => {
       @open-linter="isLinterOpen = true"
       @open-benchmark="isBenchmarkOpen = true"
       @open-guidance-records="isGuidanceRecordsOpen = true"
-      @open-project-selector="isProjectSelectorOpen = true"
       @open-issues="isIssuesOpen = true"
       @change-workspace="handleWorkspaceChange"
       @change-agent="handleAgentChange"
@@ -243,16 +228,6 @@ onMounted(() => {
       :is-open="isBenchmarkOpen"
       :active-workspace="activeWorkspace"
       @close="isBenchmarkOpen = false"
-    />
-
-    <ProjectSelectorModal 
-      v-if="isProjectSelectorOpen"
-      :active-workspace="activeWorkspace"
-      :projects="projects"
-      @close="isProjectSelectorOpen = false"
-      @project-selected="handleWorkspaceChange"
-      @project-added="handleProjectAdded"
-      @project-removed="handleProjectRemoved"
     />
 
     <AgentIssuesModal 

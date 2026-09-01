@@ -47,6 +47,12 @@ function getCacheRate(session) {
   if (!inp) return 0;
   return Math.round((cached / inp) * 100);
 }
+
+function getFreshInput(session) {
+  const input = session.totalUsage?.input_tokens || 0;
+  const cached = session.totalUsage?.cached_input_tokens || 0;
+  return Math.max(input - cached, 0);
+}
 </script>
 
 <template>
@@ -95,10 +101,11 @@ function getCacheRate(session) {
             <th>Turns</th>
             <th>
               <div class="th-wrap">
-                <span>Total Tokens</span>
-                <Tooltip placement="bottom" title="Session Total" text="Total tokens consumed across all turns in this conversation thread." />
+                <span>Observed total</span>
+                <Tooltip placement="bottom" title="Observed session total" text="Transcript telemetry across this session. It is not a provider quota measurement." />
               </div>
             </th>
+            <th>Fresh input</th>
             <th>
               <div class="th-wrap">
                 <span>Cache Hit</span>
@@ -120,6 +127,7 @@ function getCacheRate(session) {
             </td>
             <td class="mono font-semibold">{{ s.turnCount }}</td>
             <td class="mono">{{ (s.totalUsage.total_tokens || 0).toLocaleString() }}</td>
+            <td class="mono">{{ getFreshInput(s).toLocaleString() }}</td>
             <td class="mono">
               <span :class="getCacheRate(s) >= 80 ? 'text-green' : 'text-muted'">
                 {{ getCacheRate(s) }}%
@@ -144,8 +152,8 @@ function getCacheRate(session) {
           </tr>
 
           <tr v-if="filteredSessions.length === 0">
-            <td colspan="7" class="empty-cell">
-              No matching sessions found.
+            <td colspan="8" class="empty-cell">
+              {{ sessions.length ? 'No matching sessions found for this filter.' : 'No sessions are available in this scope yet.' }}
             </td>
           </tr>
         </tbody>

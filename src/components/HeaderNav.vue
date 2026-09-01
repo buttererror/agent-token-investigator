@@ -34,7 +34,6 @@ const emit = defineEmits([
   'open-linter',
   'open-benchmark',
   'open-guidance-records',
-  'open-project-selector',
   'open-issues',
   'change-workspace',
   'change-agent'
@@ -42,11 +41,6 @@ const emit = defineEmits([
 
 function onSelectProject(e) {
   const val = e.target.value;
-  if (val === '__add_project__') {
-    emit('open-project-selector');
-    e.target.value = props.activeWorkspace;
-    return;
-  }
   emit('change-workspace', val);
 }
 </script>
@@ -99,18 +93,10 @@ function onSelectProject(e) {
           <option v-if="activeWorkspace !== 'all' && !projects.some(p => p.path === activeWorkspace)" :value="activeWorkspace">
             📁 {{ activeWorkspace }}
           </option>
-          <option value="__add_project__">➕ Add / Browse Local Project...</option>
         </select>
-        <button 
-          class="btn-add-project-icon" 
-          @click="$emit('open-project-selector')"
-          title="Browse computer to select and add a local project"
-        >
-          📁+
-        </button>
         <Tooltip 
           title="Tracked Project Scope" 
-          text="Filters metrics, sessions, recommendations, and token issues to the selected repository. Click '📁+' to browse and add any folder from your computer." 
+          text="Filters metrics, sessions, recommendations, and token issues to the selected repository."
         />
       </div>
     </div>
@@ -279,23 +265,6 @@ function onSelectProject(e) {
   color: var(--text-main);
 }
 
-.btn-add-project-icon {
-  background: rgba(56, 189, 248, 0.15);
-  border: 1px solid rgba(56, 189, 248, 0.3);
-  color: var(--accent-blue);
-  font-size: 0.72rem;
-  font-weight: 700;
-  cursor: pointer;
-  padding: 1px 6px;
-  border-radius: 4px;
-  margin-left: 6px;
-  transition: all 0.15s ease;
-}
-
-.btn-add-project-icon:hover {
-  background: rgba(56, 189, 248, 0.3);
-  transform: scale(1.05);
-}
 
 .mini-count-badge {
   background: var(--accent-blue);

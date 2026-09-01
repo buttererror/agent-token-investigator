@@ -1,7 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue';
 import Tooltip from './common/Tooltip.vue';
-import { useActionSelector } from '../composables/useActionSelector.js';
 
 const props = defineProps({
   session: {
@@ -40,10 +39,7 @@ function isLikelyRoutineTurn(turn, hasNoisyTests, hasUnboundedRead) {
     && /\b(?:docs?|documentation|format(?:ting)?|rename|typo|read|review|status|list)\b/i.test(prompt);
 }
 
-const { isApplying, applyAction, undoLastAction } = useActionSelector();
-
 const showBestPractices = ref(false);
-const appliedTurnActions = ref({});
 const activeNoteTurn = ref(null);
 const turnNoteWhat = ref('');
 const turnNoteWhy = ref('');
@@ -77,15 +73,11 @@ function getTurnActions(turn) {
     actions.push({
       id: `test-script-${turn.turnNumber}`,
       type: 'script',
-      title: '📦 Inject "test:agent" Lean Script',
+      title: '📦 Use quiet, bail-fast test validation',
       badge: 'Test Optimization',
       targetFile: 'package.json',
-      whatItDoes: 'Adds "test:agent": "vitest run --bail=1 --silent" to package.json to suppress verbose console dumps.',
-      whatItAchieves: `Eliminate test noise observed in Turn #${turn.turnNumber} and cut prompt payload by ~95%.`,
-      payload: {
-        scriptName: 'test:agent',
-        scriptCommand: 'vitest run --bail=1 --silent'
-      }
+      whatItDoes: 'Use the project’s existing quiet test command, or pass supported bail and silent flags.',
+      whatItAchieves: `Avoid repeating the verbose test output observed in Turn #${turn.turnNumber}.`
     });
   }
 
@@ -94,14 +86,11 @@ function getTurnActions(turn) {
     actions.push({
       id: `rule-slice-${turn.turnNumber}`,
       type: 'rule',
-      title: '📜 Inject Line Range Slices Rule to AGENTS.md',
+      title: '📜 Read targeted file ranges',
       badge: 'Context Slicing',
       targetFile: 'AGENTS.md',
-      whatItDoes: 'Adds rule: "- Practice progressive disclosure: read targeted line ranges (StartLine/EndLine) rather than entire files."',
-      whatItAchieves: `Prevent ${fresh.toLocaleString()} un-cached token spikes seen in Turn #${turn.turnNumber}.`,
-      payload: {
-        ruleText: '\n- Practice progressive disclosure: always inspect targeted line ranges (`StartLine`/`EndLine`) rather than reading entire files into prompt context.'
-      }
+      whatItDoes: 'Search for the target symbol, then inspect only the needed line range.',
+      whatItAchieves: `Reduce the fresh input introduced in Turn #${turn.turnNumber}.`
     });
   }
 
@@ -110,14 +99,11 @@ function getTurnActions(turn) {
     actions.push({
       id: `rule-reasoning-${turn.turnNumber}`,
       type: 'rule',
-      title: '🧠 Set "reasoning_effort: low" in AGENTS.md',
+      title: '🧠 Use low reasoning for routine work',
       badge: 'Reasoning Effort',
       targetFile: 'AGENTS.md',
-      whatItDoes: 'Adds convention to AGENTS.md to set reasoning_effort: low for routine file edits and chores.',
-      whatItAchieves: `Save thinking quota (Turn #${turn.turnNumber} used ${think.toLocaleString()} reasoning tokens).`,
-      payload: {
-        ruleText: '\n- Set `reasoning_effort: low` for routine code edits, documentation, and chores; reserve `high` reasoning only for difficult algorithms.'
-      }
+      whatItDoes: 'Choose low reasoning after confirming that the task is routine rather than ambiguous or architectural.',
+      whatItAchieves: `Keep routine reasoning proportional to the ${think.toLocaleString()} observed reasoning tokens.`
     });
   }
 
@@ -150,56 +136,6 @@ This is a description for review, not a request to create a skill automatically.
 - **Description**: Reusable workflow for “${intent || 'the observed workflow'}” using ${tools.length ? tools.map((tool) => `\`${tool}\``).join(', ') : 'the observed tool sequence'}.
 - **Create it only when**: the same workflow recurs across multiple sessions and its steps can be stated without copying turn-specific paths, commands, or temporary context.
 - **Before creating it**: replace this proposal with a narrow purpose, stable inputs, and the smallest safe validation sequence.`;
-}
-
-async function handleApplyTurnAction(turn, action) {
-  const key = `${turn.turnNumber}-${action.id}`;
-  appliedTurnActions.value[key] = { status: 'applying' };
-
-  try {
-    const what = `${action.title} (from Turn #${turn.turnNumber})`;
-    const why = `Observed in Turn #${turn.turnNumber} of session ${props.session?.sessionId?.substring(0, 8) || 'session'}: ${action.whatItAchieves}`;
-    const how = action.whatItDoes;
-    const author = `Session Inspector (Turn #${turn.turnNumber})`;
-
-    const result = await applyAction(
-      {
-        ...action,
-        title: what,
-        description: action.whatItDoes,
-        whatItAchieves: why,
-        whatItDoes: how
-      },
-      props.activeWorkspace,
-      action.payload
-    );
-
-    appliedTurnActions.value[key] = {
-      status: 'success',
-      backupId: result.backup?.backupId || null,
-      message: result.message || 'Action applied and recorded in Guidance Log!'
-    };
-
-    emit('guidance-updated');
-  } catch (err) {
-    appliedTurnActions.value[key] = {
-      status: 'error',
-      message: err.message || 'Failed to apply action'
-    };
-  }
-}
-
-async function handleUndoTurnAction(turn, action, backupId) {
-  const key = `${turn.turnNumber}-${action.id}`;
-  if (!backupId) return;
-
-  try {
-    await undoLastAction(backupId);
-    delete appliedTurnActions.value[key];
-    emit('guidance-updated');
-  } catch (e) {
-    // ignore
-  }
 }
 
 function openTurnNote(turn) {
@@ -581,7 +517,7 @@ const sessionVerdict = computed(() => {
       type: 'yellow',
       badge: '🟡 Context Carryover Warning',
       headline: `This conversation reached ${turns} turns, re-sending heavy conversation history on every message.`,
-      actionAdvice: 'Recommended: Click "Export Handoff Prompt" to cleanly restart in a fresh window, cutting input token costs by ~85%.'
+      actionAdvice: 'Recommended: export a concise handoff and continue in a fresh thread when earlier context is no longer needed.'
     };
   }
   if (hasSpikes) {
@@ -659,6 +595,16 @@ function getTurnEfficiency(turn) {
   };
 }
 
+function getTurnFreshInput(turn) {
+  const input = turn?.tokenUsage?.input_tokens || 0;
+  const cached = turn?.tokenUsage?.cached_input_tokens || 0;
+  return Math.max(input - cached, 0);
+}
+
+function getTurnObservedTotal(turn) {
+  return turn?.tokenUsage?.total_tokens || 0;
+}
+
 function getTurnImprovementSuggestion(turn) {
   if (!turn.tokenUsage) {
     return {
@@ -702,7 +648,7 @@ function getTurnImprovementSuggestion(turn) {
   if (suggestions.length === 0) {
     return {
       type: 'optimal',
-      tip: '🟢 Highly efficient turn! Reused 90%+ cached context with compact tool outputs. No improvements needed.'
+      tip: '🟢 No material efficiency threshold was crossed in this observed turn.'
     };
   }
 
@@ -945,6 +891,14 @@ function formatToolArg(input) {
 
               <!-- Per Turn Token Breakdown -->
               <div v-if="turn.tokenUsage" class="turn-tokens-pill mono">
+                <Tooltip placement="top" title="Observed turn total" text="Total transcript telemetry recorded for this turn. This is activity evidence, not provider quota usage.">
+                  <span class="token-item-lbl text-blue">Observed: {{ getTurnObservedTotal(turn).toLocaleString() }}</span>
+                </Tooltip>
+                <span class="sep">•</span>
+                <Tooltip placement="top" title="Fresh input tokens" text="Input that was not served from the prompt cache and is the clearest signal of newly introduced context.">
+                  <span class="token-item-lbl text-yellow">Fresh: {{ getTurnFreshInput(turn).toLocaleString() }}</span>
+                </Tooltip>
+                <span class="sep">•</span>
                 <Tooltip 
                   placement="top"
                   title="Total Input Tokens (In)"
@@ -989,10 +943,10 @@ function formatToolArg(input) {
             <span>⚡ <strong>Turn Footprint:</strong> {{ getTurnEfficiency(turn).summary }}</span>
           </div>
 
-          <!-- Per-Turn Improvement Suggestion -->
-          <div :class="['turn-suggestion-box', `sug-${getTurnImprovementSuggestion(turn).type}`]">
+          <!-- Per-turn recommendation, shown only when an efficiency threshold is crossed. -->
+          <div v-if="getTurnImprovementSuggestion(turn).type === 'actionable'" :class="['turn-suggestion-box', `sug-${getTurnImprovementSuggestion(turn).type}`]">
             <span class="sug-icon">💡</span>
-            <span class="sug-text"><strong>Improvement Suggestion:</strong> {{ getTurnImprovementSuggestion(turn).tip }}</span>
+            <span class="sug-text"><strong>Recommendation:</strong> {{ getTurnImprovementSuggestion(turn).tip }}</span>
           </div>
 
           <!-- Noise Spikes Alert (if any) -->
@@ -1028,7 +982,7 @@ function formatToolArg(input) {
           <!-- In-Turn Actions & Guidance Logger Section -->
           <div v-if="shouldOfferIssueReport(turn)" class="turn-actions-card">
             <div class="turn-actions-header">
-              <span class="turn-actions-title">{{ isActionableTurn(turn) ? `⚡ Turn #${turn.turnNumber} Actions & Guidance:` : `🧩 Turn #${turn.turnNumber} Workflow Review:` }}</span>
+              <span class="turn-actions-title">{{ isActionableTurn(turn) ? `⚡ Turn #${turn.turnNumber} Recommendations:` : `🧩 Turn #${turn.turnNumber} Workflow Review:` }}</span>
               <button 
                 class="btn-text-sm"
                 @click="activeNoteTurn === turn.turnNumber ? activeNoteTurn = null : openTurnNote(turn)"
@@ -1044,28 +998,12 @@ function formatToolArg(input) {
                 :key="act.id" 
                 class="turn-action-row"
               >
-                <button
-                  :disabled="isApplying || appliedTurnActions[`${turn.turnNumber}-${act.id}`]?.status === 'applying'"
-                  :class="['btn-turn-action', { 'is-applied': appliedTurnActions[`${turn.turnNumber}-${act.id}`]?.status === 'success' }]"
-                  @click="handleApplyTurnAction(turn, act)"
-                  :title="act.whatItDoes"
-                >
+                <div class="btn-turn-action" :title="act.whatItDoes">
                   <span class="btn-action-badge">{{ act.badge }}</span>
                   <span class="btn-action-text">{{ act.title }}</span>
-                  <span v-if="appliedTurnActions[`${turn.turnNumber}-${act.id}`]?.status === 'applying'" class="spinner-inline">⏳ Applying...</span>
-                  <span v-else-if="appliedTurnActions[`${turn.turnNumber}-${act.id}`]?.status === 'success'" class="text-green">✅ Applied</span>
-                </button>
-
-                <!-- Feedback & Undo button -->
-                <div v-if="appliedTurnActions[`${turn.turnNumber}-${act.id}`]?.status === 'success'" class="action-feedback-pill">
-                  <span class="feedback-text text-green">Logged in Guidance Changelog</span>
-                  <button 
-                    v-if="appliedTurnActions[`${turn.turnNumber}-${act.id}`]?.backupId"
-                    class="btn-undo-link"
-                    @click="handleUndoTurnAction(turn, act, appliedTurnActions[`${turn.turnNumber}-${act.id}`].backupId)"
-                  >
-                    ↩️ Undo
-                  </button>
+                </div>
+                <div class="action-feedback-pill">
+                  <span class="feedback-text text-dim">{{ act.whatItDoes }}</span>
                 </div>
               </div>
 

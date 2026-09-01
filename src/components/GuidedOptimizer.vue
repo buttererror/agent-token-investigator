@@ -1,7 +1,6 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue';
 import Tooltip from './common/Tooltip.vue';
-import { useActionSelector } from '../composables/useActionSelector.js';
 
 const props = defineProps({
   allSessions: {
@@ -20,8 +19,6 @@ const props = defineProps({
 
 const emit = defineEmits(['open-handoff', 'open-skill-gen', 'open-linter']);
 
-const { isApplying, feedbackMessage, feedbackType, appliedBackups, applyAction, undoLastAction } = useActionSelector();
-
 const activeDiagnosticIndex = ref(0);
 const activeScopeMode = ref('all');
 const filterDate = ref(new Date().toISOString().split('T')[0]);
@@ -38,17 +35,6 @@ const localScope = ref({
   cacheHitRate: 0
 });
 
-// Diff Preview Modal state
-const diffModalAction = ref(null);
-const diffModalCustomPayload = ref(null);
-
-const editingAction = ref(null);
-const customRuleText = ref('');
-const customScriptName = ref('');
-const customScriptCmd = ref('');
-const customSkillName = ref('verify-slice');
-const customSkillTrigger = ref('$verify-slice');
-const customSkillInstructions = ref('');
 
 async function fetchLocalDiagnostics(
   scope = activeScopeMode.value, 
@@ -108,57 +94,6 @@ function onSessionChange() {
   fetchLocalDiagnostics(mode, filterDate.value, filter5HourStart.value, filterSessionId.value);
 }
 
-function startEditing(action) {
-  editingAction.value = action;
-  if (action.payload?.ruleText) customRuleText.value = action.payload.ruleText;
-  if (action.payload?.scriptName) customScriptName.value = action.payload.scriptName;
-  if (action.payload?.scriptCommand) customScriptCmd.value = action.payload.scriptCommand;
-  if (action.payload?.skillName) customSkillName.value = action.payload.skillName;
-  if (action.payload?.trigger) customSkillTrigger.value = action.payload.trigger;
-  if (action.payload?.instructions) customSkillInstructions.value = action.payload.instructions;
-}
-
-function cancelEditing() {
-  editingAction.value = null;
-}
-
-function openDiffPreview(action) {
-  if (action.payload?.actionType === 'OPEN_HANDOFF_MODAL') {
-    emit('open-handoff');
-    return;
-  }
-  if (action.systemId === 5) {
-    emit('open-linter');
-    return;
-  }
-
-  let customPayload = null;
-  if (editingAction.value?.actionId === action.actionId) {
-    if (action.systemId === 1) customPayload = { ruleText: customRuleText.value };
-    if (action.systemId === 2) customPayload = { scriptName: customScriptName.value, scriptCommand: customScriptCmd.value };
-    if (action.systemId === 3) customPayload = {
-      skillName: customSkillName.value || action.payload?.skillName,
-      trigger: customSkillTrigger.value || action.payload?.trigger,
-      instructions: customSkillInstructions.value || action.payload?.instructions
-    };
-  }
-
-  diffModalAction.value = action;
-  diffModalCustomPayload.value = customPayload;
-}
-
-async function confirmAndApply() {
-  if (!diffModalAction.value) return;
-  const action = diffModalAction.value;
-  const payload = diffModalCustomPayload.value;
-  diffModalAction.value = null;
-
-  await applyAction(action, props.activeWorkspace, payload);
-  editingAction.value = null;
-  // Refresh section diagnostics to update active rule badge
-  fetchLocalDiagnostics();
-}
-
 const isGeneratingIssue = ref(false);
 
 async function generateIssueFromRec(diagnostic, action) {
@@ -202,8 +137,8 @@ onMounted(() => {
   <div class="guided-optimizer card">
     <div class="opt-header">
       <div class="opt-title-group">
-        <h3>🎯 Guided Optimization Advisor & What-If Simulator</h3>
-        <span class="opt-sub">AI-driven diagnostics paired with section-scoped date & window filters</span>
+        <h3>🎯 Recommendations for This Scope</h3>
+        <span class="opt-sub">Observed telemetry, likely contributors, and a documented next step</span>
       </div>
 
       <!-- Scope / Date Filter Controls (Scoped specifically to this section) -->
@@ -359,8 +294,8 @@ onMounted(() => {
       <!-- Action Selector Section -->
       <div class="actions-section">
         <div class="actions-header">
-          <h5>Ways to Avoid & Fix This Issue (Select an Action):</h5>
-          <span class="text-dim text-xs">All actions write directly to {{ activeWorkspace }} with 1-click Undo</span>
+          <h5>Recommended next steps</h5>
+          <span class="text-dim text-xs">Read-only guidance; generate an issue document when follow-up is needed.</span>
         </div>
 
         <div class="actions-list">
@@ -403,62 +338,8 @@ onMounted(() => {
               </div>
             </div>
 
-            <!-- Inline Customization Form (if open) -->
-            <div v-if="editingAction?.actionId === action.actionId" class="inline-edit-box">
-              <div v-if="action.systemId === 1" class="edit-group">
-                <label>Customize Rule to Append into AGENTS.md:</label>
-                <textarea v-model="customRuleText" class="mono edit-textarea" rows="3"></textarea>
-              </div>
-              <div v-if="action.systemId === 2" class="edit-group">
-                <label>Script Name in package.json:</label>
-                <input v-model="customScriptName" class="mono edit-input" />
-                <label style="margin-top: 8px;">Command Line:</label>
-                <input v-model="customScriptCmd" class="mono edit-input" />
-              </div>
-              <div v-if="action.systemId === 3" class="edit-group">
-                <label>Skill Folder Name:</label>
-                <input v-model="customSkillName" class="mono edit-input" />
-                <label style="margin-top: 8px;">Trigger Mention:</label>
-                <input v-model="customSkillTrigger" class="mono edit-input" />
-                <label style="margin-top: 8px;">Skill Instructions (SKILL.md):</label>
-                <textarea v-model="customSkillInstructions" class="mono edit-textarea" rows="5"></textarea>
-              </div>
-              <div class="edit-actions">
-                <button class="btn btn-primary btn-sm" :disabled="isApplying" @click="openDiffPreview(action)">
-                  Preview & Apply
-                </button>
-                <button class="btn btn-secondary btn-sm" @click="cancelEditing">
-                  Cancel
-                </button>
-              </div>
-            </div>
-
-            <!-- Action Buttons -->
-            <div v-else class="action-footer">
-              <button 
-                v-if="!action.isAlreadyApplied"
-                :class="['btn', 'btn-sm', action.isRecommended ? 'btn-primary' : 'btn-secondary']"
-                :disabled="isApplying"
-                @click="openDiffPreview(action)"
-              >
-                <span>🚀</span> Apply to Project
-              </button>
-
-              <button 
-                v-else
-                class="btn btn-secondary btn-sm"
-                @click="startEditing(action)"
-              >
-                <span>✏️</span> Edit Active Rule
-              </button>
-
-              <button 
-                v-if="!action.isAlreadyApplied && (action.systemId === 1 || action.systemId === 2 || action.systemId === 3)"
-                class="btn btn-secondary btn-sm"
-                @click="startEditing(action)"
-              >
-                <span>✏️</span> Customize
-              </button>
+            <div class="action-footer">
+              <span v-if="action.isAlreadyApplied" class="text-green text-xs">Already active in this project</span>
 
               <button 
                 class="btn btn-secondary btn-sm btn-doc-issue"
@@ -481,52 +362,6 @@ onMounted(() => {
       <p>All sessions in this filtered window were executed with high efficiency and low noise.</p>
     </div>
 
-    <!-- Feedback / Undo Bar -->
-    <div v-if="feedbackMessage" :class="['feedback-bar', `feedback-${feedbackType}`]">
-      <span>{{ feedbackMessage }}</span>
-      <button 
-        v-if="appliedBackups.length > 0" 
-        class="btn btn-warning btn-sm"
-        @click="undoLastAction(appliedBackups[0].backupId)"
-      >
-        <span>↩️</span> Undo Last Action
-      </button>
-    </div>
-
-    <!-- Diff Preview & Confirmation Modal -->
-    <div v-if="diffModalAction" class="modal-overlay" @click="diffModalAction = null">
-      <div class="modal-card diff-modal" @click.stop>
-        <div class="diff-head">
-          <h3>📝 Review File Modification</h3>
-          <button class="close-btn" @click="diffModalAction = null">✕</button>
-        </div>
-
-        <div class="diff-body">
-          <div class="diff-target-info">
-            <span class="lbl">Target Repository File:</span>
-            <span class="val mono text-blue">{{ activeWorkspace }}/{{ diffModalAction.targetFile }}</span>
-          </div>
-
-          <div class="diff-view card">
-            <div class="diff-title mono">// {{ diffModalAction.targetFile }}</div>
-            <pre class="diff-code mono"><span class="diff-plus">+ {{ diffModalCustomPayload?.instructions || diffModalAction.payload?.instructions || diffModalCustomPayload?.ruleText || diffModalAction.payload?.ruleText || (diffModalAction.payload?.scriptName ? `"${diffModalAction.payload.scriptName}": "${diffModalAction.payload.scriptCommand}"` : 'Skill / Rule Configuration') }}</span></pre>
-          </div>
-
-          <div class="diff-notice">
-            <span>🛡️ <strong>Safety Guarantee:</strong> An atomic backup of your original file will be stored in <code>.backups/</code> with 1-click rollback available immediately.</span>
-          </div>
-        </div>
-
-        <div class="diff-footer">
-          <button class="btn btn-secondary btn-sm" @click="diffModalAction = null">
-            Cancel
-          </button>
-          <button class="btn btn-primary btn-sm" :disabled="isApplying" @click="confirmAndApply">
-            <span>🚀</span> Confirm & Write to Project
-          </button>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
