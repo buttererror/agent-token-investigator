@@ -1,7 +1,7 @@
 <script setup>
 import { ref } from 'vue';
 
-defineProps({
+const props = defineProps({
   text: {
     type: String,
     required: true
@@ -13,6 +13,10 @@ defineProps({
   whyItMatters: {
     type: String,
     default: ''
+  },
+  placement: {
+    type: String,
+    default: 'top' // 'top' or 'bottom'
   }
 });
 
@@ -30,7 +34,9 @@ const isVisible = ref(false);
         </svg>
       </span>
     </slot>
-    <div class="tooltip-content" :class="{ 'visible': isVisible }">
+    <div 
+      :class="['tooltip-content', `placement-${placement}`, { 'visible': isVisible }]"
+    >
       <div v-if="title" class="tooltip-title">{{ title }}</div>
       <div class="tooltip-body">{{ text }}</div>
       <div v-if="whyItMatters" class="tooltip-why">
@@ -61,7 +67,6 @@ const isVisible = ref(false);
 
 .tooltip-content {
   position: absolute;
-  bottom: 130%;
   left: 50%;
   transform: translateX(-50%);
   background-color: #1e293b;
@@ -71,14 +76,24 @@ const isVisible = ref(false);
   font-size: 0.78rem;
   line-height: 1.45;
   white-space: normal;
-  width: 270px;
+  width: 260px;
+  max-width: 85vw;
   border: 1px solid #334155;
-  box-shadow: 0 10px 25px rgba(0,0,0,0.6);
-  z-index: 999;
+  box-shadow: 0 12px 28px rgba(0,0,0,0.7);
+  z-index: 9999;
   pointer-events: none;
   opacity: 0;
   visibility: hidden;
   transition: opacity 0.15s ease, visibility 0.15s;
+}
+
+.placement-top {
+  bottom: 130%;
+}
+
+.placement-bottom {
+  top: 130%;
+  bottom: auto;
 }
 
 .tooltip-content.visible {

@@ -93,13 +93,13 @@ function getCacheRate(session) {
             <th>
               <div class="th-wrap">
                 <span>Total Tokens</span>
-                <Tooltip title="Session Total" text="Total tokens consumed across all turns in this conversation thread." />
+                <Tooltip placement="bottom" title="Session Total" text="Total tokens consumed across all turns in this conversation thread." />
               </div>
             </th>
             <th>
               <div class="th-wrap">
                 <span>Cache Hit</span>
-                <Tooltip title="Prompt Cache Ratio" text="Percentage of input tokens served from cache for this session." />
+                <Tooltip placement="bottom" title="Prompt Cache Ratio" text="Percentage of input tokens served from cache for this session." />
               </div>
             </th>
             <th>Reasoning</th>
@@ -219,6 +219,8 @@ function getCacheRate(session) {
 
 .table-responsive {
   overflow-x: auto;
+  overflow-y: visible;
+  padding-bottom: 28px;
 }
 
 .session-table {

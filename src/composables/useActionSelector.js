@@ -11,11 +11,11 @@ export function useActionSelector() {
     feedbackMessage.value = '';
 
     try {
-      const payload = customPayload || action.payload;
+      const payload = customPayload || action.payload || {};
       let res;
 
-      if (action.systemId === 1) {
-        // Action 1: AGENTS.md Rule
+      if (payload.ruleText || action.targetFile === 'AGENTS.md' || action.systemId === 1 || action.systemId === 6) {
+        // Action 1 or 6: AGENTS.md Rule
         res = await fetch('/api/apply-agents-rule', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -24,7 +24,7 @@ export function useActionSelector() {
             ruleText: payload.ruleText
           })
         });
-      } else if (action.systemId === 2) {
+      } else if (payload.scriptName || action.targetFile === 'package.json' || action.systemId === 2) {
         // Action 2: package.json script
         res = await fetch('/api/apply-package-script', {
           method: 'POST',
@@ -35,7 +35,7 @@ export function useActionSelector() {
             scriptCommand: payload.scriptCommand
           })
         });
-      } else if (action.systemId === 3) {
+      } else if (payload.skillName || action.systemId === 3) {
         // Action 3: Project skill
         res = await fetch('/api/create-skill', {
           method: 'POST',
@@ -47,6 +47,12 @@ export function useActionSelector() {
             instructions: payload.instructions
           })
         });
+      } else {
+        throw new Error(`Unsupported action type or missing payload for "${action.title || action.actionId}"`);
+      }
+
+      if (!res) {
+        throw new Error('No server response received for action.');
       }
 
       const result = await res.json();
@@ -61,7 +67,7 @@ export function useActionSelector() {
       return result;
     } catch (err) {
       feedbackType.value = 'error';
-      feedbackMessage.value = err.message;
+      feedbackMessage.value = err.message || 'An error occurred while applying action.';
       throw err;
     } finally {
       isApplying.value = false;
