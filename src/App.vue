@@ -140,9 +140,11 @@ onMounted(() => {
     <main v-if="!isLoading">
       <!-- Action 7: Rate Limits & Quota Meter -->
       <RateLimitMeter 
-        :rate-limits="overview?.latestRateLimit"
-        :pacing-forecast="pacingForecast"
+        :rate-limits="filteredOverview?.latestRateLimit || overview?.latestRateLimit"
+        :pacing-forecast="filteredPacingForecast || pacingForecast"
+        :active-agent="activeAgent"
       />
+
 
       <!-- Overview Metrics Grid -->
       <MetricsOverview :overview="filteredOverview" :sessions="filteredSessions" />

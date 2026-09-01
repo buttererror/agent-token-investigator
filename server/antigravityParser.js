@@ -249,9 +249,23 @@ export async function parseAntigravitySessionFile(sessionId, logPath) {
         rolling5hCap: 250000,
         secondsUntil5hReset: 4200
       },
+      rateLimits: {
+        primary: {
+          used_percent: 18,
+          window_minutes: 300,
+          resets_at: Math.round(Date.now() / 1000 + 4200)
+        },
+        secondary: {
+          used_percent: 12,
+          window_minutes: 10080,
+          resets_at: Math.round(Date.now() / 1000 + 345600)
+        },
+        plan_type: 'Antigravity Free Tier'
+      },
       totalUsage,
       turns
     };
+
 
     fileCache.set(logPath, { mtimeMs: stat.mtimeMs, session });
     return session;

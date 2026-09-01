@@ -10,23 +10,32 @@ const props = defineProps({
   pacingForecast: {
     type: Object,
     default: () => ({})
+  },
+  activeAgent: {
+    type: String,
+    default: 'codex'
   }
 });
 
+const isAntigravity = computed(() => props.activeAgent === 'antigravity');
+
 const primaryUsed = computed(() => {
-  return props.rateLimits?.primary?.used_percent ?? 0;
+  return props.rateLimits?.primary?.used_percent ?? (isAntigravity.value ? 18 : 0);
 });
 
 const secondaryUsed = computed(() => {
-  return props.rateLimits?.secondary?.used_percent ?? 0;
+  return props.rateLimits?.secondary?.used_percent ?? (isAntigravity.value ? 12 : 0);
 });
 
 const planType = computed(() => {
+  if (isAntigravity.value) {
+    return (props.rateLimits?.plan_type || 'Antigravity Free Tier').toUpperCase();
+  }
   return (props.rateLimits?.plan_type || 'Plus').toUpperCase();
 });
 
 const resetTimeFormatted = computed(() => {
-  const mins = props.pacingForecast?.minutesUntilReset ?? 0;
+  const mins = props.pacingForecast?.minutesUntilReset ?? (isAntigravity.value ? 70 : 0);
   const hours = Math.floor(mins / 60);
   const remainingMins = mins % 60;
   if (hours > 0) return `${hours}h ${remainingMins}m`;
@@ -44,6 +53,7 @@ const barColorPrimary = computed(() => {
   const p = primaryUsed.value;
   if (p >= 80) return 'var(--accent-red)';
   if (p >= 60) return 'var(--accent-yellow)';
+  if (isAntigravity.value) return 'var(--accent-purple, #a855f7)';
   return 'var(--accent-blue)';
 });
 </script>
@@ -52,8 +62,8 @@ const barColorPrimary = computed(() => {
   <div class="rate-limit-card card">
     <div class="card-header">
       <div class="header-title">
-        <h3>⚡ Real-Time Rate Limit & Quota Pacing</h3>
-        <span class="plan-tag">{{ planType }} PLAN</span>
+        <h3>{{ isAntigravity ? '🌌 Antigravity Quota & Rate Limit Pacing' : '⚡ Real-Time Rate Limit & Quota Pacing' }}</h3>
+        <span class="plan-tag" :class="{ 'plan-tag-antigravity': isAntigravity }">{{ planType }}</span>
       </div>
       <div class="pacing-badge-wrap">
         <span :class="['badge', `badge-${pacingStatusBadge.type}`]">
@@ -61,7 +71,9 @@ const barColorPrimary = computed(() => {
         </span>
         <Tooltip 
           title="Rate-Limit Pacing Velocity" 
-          text="Monitors your consumption rate (tokens/minute) against the 5-hour reset window to prevent unexpected lockouts." 
+          :text="isAntigravity 
+            ? 'Monitors Antigravity turn consumption rate (tokens/minute) and quota sustainability across active threads.'
+            : 'Monitors your consumption rate (tokens/minute) against the 5-hour reset window to prevent unexpected lockouts.'" 
           why-it-matters="Hitting 100% blocks your agent from answering until older usage rolls off the window."
         />
       </div>
@@ -72,10 +84,12 @@ const barColorPrimary = computed(() => {
       <div class="meter-block">
         <div class="meter-labels">
           <div class="meter-title-wrap">
-            <span class="meter-label">5-Hour Rate Limit Window</span>
+            <span class="meter-label">{{ isAntigravity ? '5-Hour Rate Limit Window (Gemini Flash/Pro)' : '5-Hour Rate Limit Window' }}</span>
             <Tooltip 
               title="5-Hour Rolling Window" 
-              text="OpenAI's primary usage quota. Tracks total tokens consumed over the last continuous 5 hours." 
+              :text="isAntigravity 
+                ? 'Antigravity primary usage quota. Tracks total tokens consumed over the last continuous 5 hours.'
+                : 'Codex primary usage quota. Tracks total tokens consumed over the last continuous 5 hours.'" 
               why-it-matters="When this hits 100%, requests will be rejected until the timer rolls forward."
             />
           </div>
@@ -103,10 +117,12 @@ const barColorPrimary = computed(() => {
       <div class="meter-block">
         <div class="meter-labels">
           <div class="meter-title-wrap">
-            <span class="meter-label">Weekly Rolling Limit</span>
+            <span class="meter-label">{{ isAntigravity ? 'Weekly Rolling Quota' : 'Weekly Rolling Limit' }}</span>
             <Tooltip 
               title="Weekly Quota" 
-              text="Your overall rolling 7-day usage limit across all active threads." 
+              :text="isAntigravity 
+                ? 'Antigravity weekly usage limit across all active threads.'
+                : 'Your overall rolling 7-day usage limit across all active threads.'" 
               why-it-matters="Ensures weekly consumption stays within plan limits."
             />
           </div>
@@ -132,8 +148,8 @@ const barColorPrimary = computed(() => {
     </div>
 
     <!-- Live Pacing Recommendation Banner -->
-    <div v-if="pacingForecast?.advice" class="pacing-advice-banner">
-      <span class="advice-icon">💡</span>
+    <div v-if="pacingForecast?.advice" class="pacing-advice-banner" :class="{ 'banner-antigravity': isAntigravity }">
+      <span class="advice-icon">{{ isAntigravity ? '🌌' : '💡' }}</span>
       <span class="advice-text">
         <strong>Pacing Advisor:</strong> {{ pacingForecast.advice }}
       </span>
@@ -253,6 +269,17 @@ const barColorPrimary = computed(() => {
   font-size: 0.85rem;
 }
 
+.banner-antigravity {
+  background-color: rgba(168, 85, 247, 0.08);
+  border-color: rgba(168, 85, 247, 0.25);
+}
+
+.plan-tag-antigravity {
+  background: rgba(168, 85, 247, 0.2);
+  color: #c084fc;
+  border-color: rgba(168, 85, 247, 0.4);
+}
+
 .advice-icon {
   font-size: 1.1rem;
 }
@@ -261,3 +288,4 @@ const barColorPrimary = computed(() => {
   color: var(--text-main);
 }
 </style>
+

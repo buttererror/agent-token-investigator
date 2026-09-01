@@ -34,7 +34,19 @@ app.use((req, res, next) => {
 // 1. Overview metrics
 app.get('/api/overview', async (req, res) => {
   try {
-    const overview = await getOverviewMetrics();
+    const { agent, workspace } = req.query;
+    let sessions = await getAllSessions();
+    if (agent && agent !== 'all') {
+      sessions = sessions.filter(s => (s.agentType || 'codex') === agent);
+    }
+    if (workspace && workspace !== 'all') {
+      const target = workspace.toLowerCase().replace(/[\/\\]+$/, '');
+      sessions = sessions.filter(s => {
+        const cwd = (s.meta?.cwd || '').toLowerCase().replace(/[\/\\]+$/, '');
+        return cwd.startsWith(target) || target.startsWith(cwd);
+      });
+    }
+    const overview = await getOverviewMetrics(sessions);
     res.json(overview);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -81,7 +93,18 @@ app.get('/api/diagnostics', async (req, res) => {
 // 5. Action 7: Pacing & burn-rate forecast
 app.get('/api/pacing-forecast', async (req, res) => {
   try {
-    const sessions = await getAllSessions();
+    const { agent, workspace } = req.query;
+    let sessions = await getAllSessions();
+    if (agent && agent !== 'all') {
+      sessions = sessions.filter(s => (s.agentType || 'codex') === agent);
+    }
+    if (workspace && workspace !== 'all') {
+      const target = workspace.toLowerCase().replace(/[\/\\]+$/, '');
+      sessions = sessions.filter(s => {
+        const cwd = (s.meta?.cwd || '').toLowerCase().replace(/[\/\\]+$/, '');
+        return cwd.startsWith(target) || target.startsWith(cwd);
+      });
+    }
     const overview = await getOverviewMetrics(sessions);
     const forecast = calculatePacingForecast(overview.latestRateLimit, sessions);
     res.json(forecast);
@@ -89,6 +112,7 @@ app.get('/api/pacing-forecast', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
 
 // 6. Action 4: Session handoff compiler
 app.get('/api/generate-handoff/:id', async (req, res) => {
