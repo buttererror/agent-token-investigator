@@ -16,7 +16,11 @@ function createBackup(filePath) {
   const content = fs.readFileSync(filePath, 'utf8');
   const backupId = `bak-${Date.now()}-${path.basename(filePath)}`;
   const backupPath = path.join(BACKUP_DIR, backupId);
+  const metaPath = path.join(BACKUP_DIR, `${backupId}.meta.json`);
+  
   fs.writeFileSync(backupPath, content, 'utf8');
+  fs.writeFileSync(metaPath, JSON.stringify({ backupId, originalPath: filePath, timestamp: new Date().toISOString() }, null, 2), 'utf8');
+  
   return { backupId, backupPath, originalPath: filePath, timestamp: new Date().toISOString() };
 }
 
@@ -172,10 +176,35 @@ export function undoAction(backupId) {
   }
 
   const originalContent = fs.readFileSync(backupPath, 'utf8');
+  const metaPath = path.join(BACKUP_DIR, `${backupId}.meta.json`);
+  let originalPath = '';
+
+  if (fs.existsSync(metaPath)) {
+    try {
+      const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+      originalPath = meta.originalPath;
+      if (originalPath) {
+        fs.writeFileSync(originalPath, originalContent, 'utf8');
+      }
+    } catch {}
+  }
+
+  const record = logGuidanceChange({
+    projectPath: originalPath ? path.dirname(originalPath) : null,
+    actionType: 'UNDO_ACTION',
+    what: `Rolled back file modification from backup (${path.basename(backupId)})`,
+    why: 'User requested rollback of previous guidance optimization action',
+    how: `Restored ${originalPath || backupPath} to previous backup state`,
+    targetFile: originalPath,
+    author: 'Rollback Coordinator',
+    backupId
+  });
 
   return {
     success: true,
     restoredFrom: backupPath,
+    targetFile: originalPath,
+    guidanceRecord: record,
     message: `Restored original state from backup ${backupId}`
   };
 }
