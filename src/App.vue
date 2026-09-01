@@ -147,8 +147,10 @@ async function handleAddGuidanceRecord(data) {
     <TurnInspectorModal 
       v-if="activeInspectSession"
       :session="activeInspectSession"
+      :active-workspace="activeWorkspace"
       @close="activeInspectSession = null"
       @export-handoff="handleExportHandoff"
+      @guidance-updated="() => fetchGuidanceRecords(activeWorkspace)"
     />
 
     <ActionPromptLinterModal 

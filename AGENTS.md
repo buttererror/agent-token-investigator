@@ -79,3 +79,6 @@ The diagnostic engine ([`server/analyzer.js`](server/analyzer.js)) and action ap
 - [ ] **Validate Active Skills**: Inspect `.agents/skills/` to retire obsolete skills and optimize active skill triggers.
 - [ ] **Update Package Test Scripts**: Ensure test runner flags (`--bail 1`, `--silent`) match current test framework versions.
 - [ ] **Synchronize Multi-Project Rules**: Ensure project-specific `AGENTS.md` across workspaces reflect latest best practices.
+
+## Token Optimization Rules
+- Practice progressive disclosure: always inspect targeted line ranges (StartLine/EndLine) rather than reading entire files into prompt context.

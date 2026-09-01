@@ -1,17 +1,31 @@
 <script setup>
 import { ref, computed } from 'vue';
 import Tooltip from './common/Tooltip.vue';
+import { useActionSelector } from '../composables/useActionSelector.js';
 
 const props = defineProps({
   session: {
     type: Object,
     required: true
+  },
+  activeWorkspace: {
+    type: String,
+    default: '/home/ellol/solutions/clinic-platform'
   }
 });
 
-defineEmits(['close', 'export-handoff']);
+const emit = defineEmits(['close', 'export-handoff', 'guidance-updated']);
+
+const { isApplying, applyAction, undoLastAction } = useActionSelector();
 
 const showBestPractices = ref(false);
+const appliedTurnActions = ref({});
+const activeNoteTurn = ref(null);
+const turnNoteWhat = ref('');
+const turnNoteWhy = ref('');
+const turnNoteHow = ref('');
+const turnNoteTarget = ref('AGENTS.md');
+const isSubmittingTurnNote = ref(false);
 
 const cacheRate = computed(() => {
   const inp = props.session?.totalUsage?.input_tokens || 0;
@@ -19,6 +33,192 @@ const cacheRate = computed(() => {
   if (!inp) return 0;
   return Math.round((cached / inp) * 100);
 });
+
+function getTurnActions(turn) {
+  const actions = [];
+  const inp = turn.tokenUsage?.input_tokens || 0;
+  const cached = turn.tokenUsage?.cached_input_tokens || 0;
+  const fresh = Math.max(inp - cached, 0);
+  const think = turn.tokenUsage?.reasoning_output_tokens || 0;
+  const toolCount = turn.toolCalls?.length || 0;
+  const hasTests = turn.toolCalls?.some(tc => {
+    const s = JSON.stringify(tc || '').toLowerCase();
+    return s.includes('test') || s.includes('vitest') || s.includes('jest');
+  });
+
+  // Action: Test suppression
+  if (hasTests) {
+    actions.push({
+      id: `test-script-${turn.turnNumber}`,
+      type: 'script',
+      title: '📦 Inject "test:agent" Lean Script',
+      badge: 'Test Optimization',
+      targetFile: 'package.json',
+      whatItDoes: 'Adds "test:agent": "vitest run --bail=1 --silent" to package.json to suppress verbose console dumps.',
+      whatItAchieves: `Eliminate test noise observed in Turn #${turn.turnNumber} and cut prompt payload by ~95%.`,
+      payload: {
+        scriptName: 'test:agent',
+        scriptCommand: 'vitest run --bail=1 --silent'
+      }
+    });
+  }
+
+  // Action: File inspection constraints / Line ranges
+  if (fresh > 20000 || toolCount >= 4) {
+    actions.push({
+      id: `rule-slice-${turn.turnNumber}`,
+      type: 'rule',
+      title: '📜 Inject Line Range Slices Rule to AGENTS.md',
+      badge: 'Context Slicing',
+      targetFile: 'AGENTS.md',
+      whatItDoes: 'Adds rule: "- Practice progressive disclosure: read targeted line ranges (StartLine/EndLine) rather than entire files."',
+      whatItAchieves: `Prevent ${fresh.toLocaleString()} un-cached token spikes seen in Turn #${turn.turnNumber}.`,
+      payload: {
+        ruleText: '\n- Practice progressive disclosure: always inspect targeted line ranges (`StartLine`/`EndLine`) rather than reading entire files into prompt context.'
+      }
+    });
+  }
+
+  // Action: Skill generation for dense tool workflows
+  if (toolCount >= 4) {
+    actions.push({
+      id: `skill-workflow-${turn.turnNumber}`,
+      type: 'skill',
+      title: `🧩 Package Turn #${turn.turnNumber} into Project Skill`,
+      badge: 'Modular Skill',
+      targetFile: '.agents/skills/turn-workflow/SKILL.md',
+      whatItDoes: 'Generates a reusable progressive disclosure skill in .agents/skills/ to run this multi-step verification in 1 trigger.',
+      whatItAchieves: `Encapsulates the ${toolCount} tool invocations from Turn #${turn.turnNumber} into a bounded skill.`,
+      payload: {
+        skillName: `verify-turn-${turn.turnNumber}`,
+        trigger: `$verify-turn-${turn.turnNumber}`,
+        instructions: `# Turn #${turn.turnNumber} Verification Skill\nExecute focused checks with minimal output payload:\n` +
+          (turn.toolCalls || []).slice(0, 3).map(t => `- ${t.tool}: ${formatToolArg(t.input)}`).join('\n')
+      }
+    });
+  }
+
+  // Action: Reasoning optimization
+  if (think > 1200) {
+    actions.push({
+      id: `rule-reasoning-${turn.turnNumber}`,
+      type: 'rule',
+      title: '🧠 Set "reasoning_effort: low" in AGENTS.md',
+      badge: 'Reasoning Effort',
+      targetFile: 'AGENTS.md',
+      whatItDoes: 'Adds convention to AGENTS.md to set reasoning_effort: low for routine file edits and chores.',
+      whatItAchieves: `Save thinking quota (Turn #${turn.turnNumber} used ${think.toLocaleString()} reasoning tokens).`,
+      payload: {
+        ruleText: '\n- Set `reasoning_effort: low` for routine code edits, documentation, and chores; reserve `high` reasoning only for difficult algorithms.'
+      }
+    });
+  }
+
+  // Fallback generic guidance rule if none matched
+  if (actions.length === 0) {
+    actions.push({
+      id: `rule-general-${turn.turnNumber}`,
+      type: 'rule',
+      title: '📜 Add Turn Best Practice Rule to AGENTS.md',
+      badge: 'Efficiency Convention',
+      targetFile: 'AGENTS.md',
+      whatItDoes: 'Incorporate turn boundaries and progressive disclosure into AGENTS.md.',
+      whatItAchieves: `Keep future sessions aligned with Turn #${turn.turnNumber} standards.`,
+      payload: {
+        ruleText: '\n- Keep conversation turns single-objective and concise to maximize prompt cache hit rates.'
+      }
+    });
+  }
+
+  return actions;
+}
+
+async function handleApplyTurnAction(turn, action) {
+  const key = `${turn.turnNumber}-${action.id}`;
+  appliedTurnActions.value[key] = { status: 'applying' };
+
+  try {
+    const what = `${action.title} (from Turn #${turn.turnNumber})`;
+    const why = `Observed in Turn #${turn.turnNumber} of session ${props.session?.sessionId?.substring(0, 8) || 'session'}: ${action.whatItAchieves}`;
+    const how = action.whatItDoes;
+    const author = `Session Inspector (Turn #${turn.turnNumber})`;
+
+    const result = await applyAction(
+      {
+        ...action,
+        title: what,
+        description: action.whatItDoes,
+        whatItAchieves: why,
+        whatItDoes: how
+      },
+      props.activeWorkspace,
+      action.payload
+    );
+
+    appliedTurnActions.value[key] = {
+      status: 'success',
+      backupId: result.backup?.backupId || null,
+      message: result.message || 'Action applied and recorded in Guidance Log!'
+    };
+
+    emit('guidance-updated');
+  } catch (err) {
+    appliedTurnActions.value[key] = {
+      status: 'error',
+      message: err.message || 'Failed to apply action'
+    };
+  }
+}
+
+async function handleUndoTurnAction(turn, action, backupId) {
+  const key = `${turn.turnNumber}-${action.id}`;
+  if (!backupId) return;
+
+  try {
+    await undoLastAction(backupId);
+    delete appliedTurnActions.value[key];
+    emit('guidance-updated');
+  } catch (e) {
+    // ignore
+  }
+}
+
+function openTurnNote(turn) {
+  activeNoteTurn.value = turn.turnNumber;
+  turnNoteWhat.value = `Optimized workflow from Turn #${turn.turnNumber}`;
+  turnNoteWhy.value = `Turn #${turn.turnNumber} in session ${props.session?.sessionId?.substring(0, 8)} used ${turn.tokenUsage?.input_tokens?.toLocaleString() || 0} tokens with ${turn.toolCalls?.length || 0} tool calls.`;
+  turnNoteHow.value = `Updated ${turnNoteTarget.value} to enforce bounded inspection and minimal payload noise.`;
+}
+
+async function saveTurnNote(turn) {
+  if (!turnNoteWhat.value.trim() || !turnNoteWhy.value.trim() || !turnNoteHow.value.trim()) return;
+  isSubmittingTurnNote.value = true;
+
+  try {
+    const res = await fetch('/api/guidance-records', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        projectPath: props.activeWorkspace,
+        actionType: 'MANUAL_GUIDANCE_EDIT',
+        what: turnNoteWhat.value.trim(),
+        why: turnNoteWhy.value.trim(),
+        how: turnNoteHow.value.trim(),
+        targetFile: turnNoteTarget.value.trim(),
+        author: `Session Inspector (Turn #${turn.turnNumber})`
+      })
+    });
+
+    if (res.ok) {
+      activeNoteTurn.value = null;
+      emit('guidance-updated');
+    }
+  } catch (e) {
+    // ignore
+  } finally {
+    isSubmittingTurnNote.value = false;
+  }
+}
 
 const sessionVerdict = computed(() => {
   const turns = props.session?.turnCount || 0;
@@ -406,6 +606,71 @@ function formatToolArg(input) {
           <div v-if="turn.assistantMessage" class="assistant-section">
             <div class="section-label">Assistant Response:</div>
             <div class="assistant-preview mono">{{ String(turn.assistantMessage).substring(0, 240) }}...</div>
+          </div>
+
+          <!-- In-Turn Actions & Guidance Logger Section -->
+          <div class="turn-actions-card">
+            <div class="turn-actions-header">
+              <span class="turn-actions-title">⚡ Turn #{{ turn.turnNumber }} Actions & Guidance:</span>
+              <button 
+                class="btn-text-sm"
+                @click="activeNoteTurn === turn.turnNumber ? activeNoteTurn = null : openTurnNote(turn)"
+              >
+                {{ activeNoteTurn === turn.turnNumber ? '✕ Cancel Note' : '📝 Document Turn Guidance' }}
+              </button>
+            </div>
+
+            <!-- Action Pills Grid -->
+            <div class="turn-actions-list">
+              <div 
+                v-for="act in getTurnActions(turn)" 
+                :key="act.id" 
+                class="turn-action-row"
+              >
+                <button
+                  :disabled="isApplying || appliedTurnActions[`${turn.turnNumber}-${act.id}`]?.status === 'applying'"
+                  :class="['btn-turn-action', { 'is-applied': appliedTurnActions[`${turn.turnNumber}-${act.id}`]?.status === 'success' }]"
+                  @click="handleApplyTurnAction(turn, act)"
+                  :title="act.whatItDoes"
+                >
+                  <span class="btn-action-badge">{{ act.badge }}</span>
+                  <span class="btn-action-text">{{ act.title }}</span>
+                  <span v-if="appliedTurnActions[`${turn.turnNumber}-${act.id}`]?.status === 'applying'" class="spinner-inline">⏳ Applying...</span>
+                  <span v-else-if="appliedTurnActions[`${turn.turnNumber}-${act.id}`]?.status === 'success'" class="text-green">✅ Applied</span>
+                </button>
+
+                <!-- Feedback & Undo button -->
+                <div v-if="appliedTurnActions[`${turn.turnNumber}-${act.id}`]?.status === 'success'" class="action-feedback-pill">
+                  <span class="feedback-text text-green">Logged in Guidance Changelog</span>
+                  <button 
+                    v-if="appliedTurnActions[`${turn.turnNumber}-${act.id}`]?.backupId"
+                    class="btn-undo-link"
+                    @click="handleUndoTurnAction(turn, act, appliedTurnActions[`${turn.turnNumber}-${act.id}`].backupId)"
+                  >
+                    ↩️ Undo
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- In-Turn Custom Guidance Note Form -->
+            <div v-if="activeNoteTurn === turn.turnNumber" class="turn-note-form card">
+              <div class="note-form-head">
+                <strong>📝 Record Guidance Change from Turn #{{ turn.turnNumber }}</strong>
+                <span class="text-xs text-dim">Project: {{ activeWorkspace }}</span>
+              </div>
+              <div class="note-inputs">
+                <input v-model="turnNoteWhat" class="note-input" placeholder="What changed..." />
+                <textarea v-model="turnNoteWhy" rows="2" class="note-input" placeholder="Why (reason / turn payload)..."></textarea>
+                <textarea v-model="turnNoteHow" rows="2" class="note-input mono" placeholder="How (script, rule, mechanism)..."></textarea>
+              </div>
+              <div class="note-actions">
+                <button class="btn btn-secondary btn-sm" @click="activeNoteTurn = null">Cancel</button>
+                <button class="btn btn-primary btn-sm" :disabled="isSubmittingTurnNote" @click="saveTurnNote(turn)">
+                  {{ isSubmittingTurnNote ? 'Saving...' : 'Save to Guidance Changelog' }}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -827,4 +1092,163 @@ function formatToolArg(input) {
 .text-xs { font-size: 0.72rem; }
 .text-green { color: var(--accent-green); }
 .text-purple { color: var(--accent-purple); }
+
+/* In-Turn Actions & Guidance Logger */
+.turn-actions-card {
+  margin-top: 12px;
+  background: rgba(14, 20, 36, 0.6);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.turn-actions-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.turn-actions-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--accent-blue);
+  letter-spacing: 0.02em;
+}
+
+.btn-text-sm {
+  background: transparent;
+  border: none;
+  color: var(--accent-blue);
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.btn-text-sm:hover {
+  background: rgba(56, 189, 248, 0.15);
+}
+
+.turn-actions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.turn-action-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.btn-turn-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-turn-action:hover:not(:disabled) {
+  border-color: var(--accent-blue);
+  background: rgba(56, 189, 248, 0.08);
+  transform: translateY(-1px);
+}
+
+.btn-turn-action:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-turn-action.is-applied {
+  border-color: rgba(34, 197, 94, 0.4);
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.btn-action-badge {
+  font-size: 0.68rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.action-feedback-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.74rem;
+  background: rgba(34, 197, 94, 0.1);
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(34, 197, 94, 0.25);
+}
+
+.btn-undo-link {
+  background: transparent;
+  border: none;
+  color: var(--accent-red);
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btn-undo-link:hover {
+  text-decoration: underline;
+}
+
+.turn-note-form {
+  margin-top: 10px;
+  padding: 12px;
+  background: rgba(11, 15, 25, 0.9);
+  border: 1px dashed var(--accent-blue);
+}
+
+.note-form-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 0.8rem;
+}
+
+.note-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.note-input {
+  width: 100%;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  outline: none;
+}
+
+.note-input:focus {
+  border-color: var(--accent-blue);
+}
+
+.note-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
 </style>
