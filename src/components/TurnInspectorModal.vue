@@ -232,7 +232,12 @@ async function handleGenerateTurnIssue(turn) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         projectPath: props.activeWorkspace,
-        session: props.session,
+        session: {
+          sessionId: props.session?.sessionId,
+          threadName: props.session?.threadName,
+          filePath: props.session?.filePath,
+          meta: props.session?.meta
+        },
         turn
       })
     });
