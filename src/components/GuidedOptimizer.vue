@@ -328,30 +328,31 @@ onMounted(() => {
         </div>
         <p class="diag-headline">{{ localDiagnostics[activeDiagnosticIndex].headline }}</p>
 
-        <!-- What-If Simulation Box -->
+        <!-- Measured evidence box -->
         <div class="what-if-box">
           <div class="what-if-head">
-            <span class="what-if-tag">🔬 Quantified What-If Simulation ({{ localScope?.label || 'All Time' }})</span>
+            <span class="what-if-tag">🔎 Measured Telemetry Evidence ({{ localScope?.label || 'All Time' }})</span>
             <Tooltip 
-              title="Mathematical Impact Simulation" 
-              text="Calculates your exact historical waste in this time window and forecasts quota recovery if an optimization is applied." 
+              title="Measured Telemetry Evidence"
+              text="Shows observed tokens and tool signals. It does not claim that all affected tokens were waste or predict savings that telemetry cannot prove."
             />
           </div>
           <div class="sim-metrics-grid">
             <div class="sim-stat">
-              <span class="sim-stat-label">Wasted in this Period</span>
-              <span class="sim-stat-val text-red mono">~{{ localDiagnostics[activeDiagnosticIndex].quantifiedWaste.tokensWasted.toLocaleString() }} tokens</span>
+              <span class="sim-stat-label">{{ localDiagnostics[activeDiagnosticIndex].measuredImpact.label }}</span>
+              <span class="sim-stat-val text-yellow mono">{{ localDiagnostics[activeDiagnosticIndex].measuredImpact.tokens.toLocaleString() }} tokens</span>
             </div>
             <div class="sim-stat">
-              <span class="sim-stat-label">5-Hour Quota Impact</span>
-              <span class="sim-stat-val text-yellow mono">{{ localDiagnostics[activeDiagnosticIndex].quantifiedWaste.quotaPercent }}% of Limit</span>
+              <span class="sim-stat-label">Share of Recorded Usage</span>
+              <span class="sim-stat-val text-yellow mono">{{ localDiagnostics[activeDiagnosticIndex].measuredImpact.sharePercent ?? '—' }}<template v-if="localDiagnostics[activeDiagnosticIndex].measuredImpact.sharePercent !== null">%</template></span>
             </div>
             <div class="sim-stat">
-              <span class="sim-stat-label">Projected Token Reduction</span>
-              <span class="sim-stat-val text-green mono">-{{ localDiagnostics[activeDiagnosticIndex].whatIfSimulation.savedPercent }}% Noise</span>
+              <span class="sim-stat-label">Savings Forecast</span>
+              <span class="sim-stat-val mono">Requires validation</span>
             </div>
           </div>
-          <p class="sim-forecast">{{ localDiagnostics[activeDiagnosticIndex].whatIfSimulation.forecast }}</p>
+          <p class="sim-forecast">{{ localDiagnostics[activeDiagnosticIndex].measuredImpact.description }}</p>
+          <p class="sim-forecast">{{ localDiagnostics[activeDiagnosticIndex].measuredImpact.validation }}</p>
         </div>
       </div>
 

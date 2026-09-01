@@ -40,6 +40,10 @@ Every generated markdown file contains:
 
 Efficient turns have no corrective action or issue-generation control. The UI offers work orders only when a turn has an evidence-backed recommendation.
 
+Dense one-off workflows do not create project skills. Their issue report includes a proposed name, description, trigger, and creation criteria for human or agent review; it becomes a real skill only after the workflow is shown to recur and can be generalized safely.
+
+The Guided Optimization Advisor reports observed tokens in affected turns and the share of recorded usage. It does not label those tokens as proven waste or predict a savings percentage until comparable before-and-after telemetry exists.
+
 ---
 
 ## 3. Issue Generation Points Across the App

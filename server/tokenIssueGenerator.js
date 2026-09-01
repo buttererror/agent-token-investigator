@@ -99,6 +99,22 @@ function isLikelyRoutineTurn(turn, hasNoisyTests, hasUnboundedRead) {
     && /\b(?:docs?|documentation|format(?:ting)?|rename|typo|read|review|status|list)\b/i.test(prompt);
 }
 
+function buildSkillProposal(turn) {
+  const tools = [...new Set((turn?.toolCalls || []).map((tool) => tool.tool).filter(Boolean))].slice(0, 6);
+  const intent = String(turn?.userPrompt || 'the observed workflow').replace(/\s+/g, ' ').trim().slice(0, 160);
+  const name = `workflow-turn-${turn?.turnNumber || 1}`;
+
+  return `## 5. Proposed Reusable Skill (Review Before Creating)
+
+This is a description for review, not a request to create a skill automatically.
+
+- **Suggested name**: \`${name}\`
+- **Suggested trigger**: \`$${name}\`
+- **Description**: Reusable workflow for “${intent || 'the observed workflow'}” using ${tools.length ? tools.map((tool) => `\`${tool}\``).join(', ') : 'the observed tool sequence'}.
+- **Create it only when**: the same workflow recurs across multiple sessions and its steps can be stated without copying turn-specific paths, commands, or temporary context.
+- **Before creating it**: replace this proposal with a narrow purpose, stable inputs, and the smallest safe validation sequence.`;
+}
+
 /**
  * Generates an Autonomous Agent Work Order / Issue Doc for a specific turn
  */
@@ -140,6 +156,7 @@ export function generateTurnIssueReport({ projectPath, session, turn }) {
   let verificationCommand = projectControls.hasTestRunner
     ? 'npm run test:agent || npm test -- --bail 1 --silent'
     : 'npm run build';
+  let skillProposal = '';
 
   if (hasNoisyTests) {
     problemHeadline = 'Unfiltered Test Suite Console Noise';
@@ -186,11 +203,12 @@ export function generateTurnIssueReport({ projectPath, session, turn }) {
     problemHeadline = 'Dense Multi-Step Tool Execution Carryover';
     problemDetails = `Executed ${turn.toolCalls.length} distinct tool calls in a single conversational turn, inflating turn payload.`;
     projectedSavingsTokens = Math.round(inp * 0.6);
-    recommendedAction = 'Package multi-step verification into a reusable project skill in .agents/skills/';
+    recommendedAction = 'Review the proposed skill below; create it only if this workflow recurs and can be generalized safely.';
     badExample = 'Prompting multi-phase architectural chores across sequential tool calls in a single unbounded turn.';
     goodExample = 'Packaging the verification sequence into a modular `.agents/skills/verify-slice/SKILL.md` skill.';
     resolutionRules = `- Package repetitive multi-turn test/lint workflows into modular \`.agents/skills/\`.\n- Allow automatic invocation only for narrow, broadly safe skills with a clear trigger; keep broad or specialized skills explicit-only.`;
     targetFiles = 'the relevant workflow under [.agents/skills/](.agents/skills/)';
+    skillProposal = buildSkillProposal(turn);
   }
 
   const agentPrompt = `Please inspect and resolve the token inefficiency documented in @docs/tokens-consumptions/issues/${fileName}. Verify the listed project controls first, implement only the smallest missing correction, and do not duplicate an existing rule or script.`;
@@ -271,7 +289,7 @@ ${verificationCommand}
 
 ---
 
-## 5. Concrete Code Examples
+${skillProposal ? `---\n\n${skillProposal}\n\n` : ''}## ${skillProposal ? '6' : '5'}. Concrete Code Examples
 
 ### ❌ Inefficient Pattern (Observed in Turn #${turnNum}):
 ${badExample}
@@ -318,7 +336,7 @@ export function generateRecommendationIssueReport({ projectPath, diagnostic, act
 
   const headline = diagnostic?.headline || 'Token Inefficiency Pattern';
   const category = diagnostic?.category || 'General Context Bloat';
-  const savings = diagnostic?.wasteQuantification?.estimatedTokens || 25000;
+  const measuredImpact = diagnostic?.measuredImpact || null;
   const targetFile = action?.targetFile || 'AGENTS.md';
 
   const agentPrompt = `Please resolve the optimization issue in @docs/tokens-consumptions/issues/${fileName}. Implement the required configuration changes to ${targetFile} and verify with silent test runs.`;
@@ -343,9 +361,10 @@ ${agentPrompt}
 ## 1. Problem Diagnosis
 
 ### 🚨 **${headline}**
-${diagnostic?.description || ''}
+${measuredImpact?.description || diagnostic?.description || ''}
 
-- **Estimated Wasted Tokens**: **~${savings.toLocaleString()} tokens**
+- **Observed Signal**: **${measuredImpact ? `${measuredImpact.label}: ${measuredImpact.tokens.toLocaleString()} tokens` : 'No token quantity available'}**
+- **Savings Claim**: Not estimated; validate with comparable before-and-after telemetry.
 - **Target File to Update**: [\`${targetFile}\`](${targetFile})
 - **Recommended Action**: **${action?.title || 'Apply Optimization Fix'}**
 
@@ -387,7 +406,7 @@ ${action?.customPayload?.ruleText || action?.diffPreview || '// Configure lean t
     content: markdownContent,
     agentPrompt,
     guidanceRecord: record,
-    savings
+    measuredTokens: measuredImpact?.tokens ?? null
   };
 }
 

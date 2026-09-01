@@ -58,8 +58,8 @@ const cacheRate = computed(() => {
   return Math.round((cached / inp) * 100);
 });
 
-const actionableTurnCount = computed(() => {
-  return (props.session?.turns || []).filter(isActionableTurn).length;
+const reportableTurnCount = computed(() => {
+  return (props.session?.turns || []).filter(shouldOfferIssueReport).length;
 });
 
 function getTurnActions(turn) {
@@ -68,7 +68,6 @@ function getTurnActions(turn) {
   const cached = turn.tokenUsage?.cached_input_tokens || 0;
   const fresh = Math.max(inp - cached, 0);
   const think = turn.tokenUsage?.reasoning_output_tokens || 0;
-  const toolCount = turn.toolCalls?.length || 0;
   const hasNoisyTests = turn.toolCalls?.some(isNoisyTestInvocation);
   const hasUnboundedRead = turn.toolCalls?.some(hasUnboundedFileRead);
   const hasRoutineHighThinking = think > 1200 && isLikelyRoutineTurn(turn, hasNoisyTests, hasUnboundedRead);
@@ -106,25 +105,6 @@ function getTurnActions(turn) {
     });
   }
 
-  // Action: Skill generation for dense tool workflows
-  if (toolCount >= 4) {
-    actions.push({
-      id: `skill-workflow-${turn.turnNumber}`,
-      type: 'skill',
-      title: `🧩 Package Turn #${turn.turnNumber} into Project Skill`,
-      badge: 'Modular Skill',
-      targetFile: '.agents/skills/turn-workflow/SKILL.md',
-      whatItDoes: 'Generates a reusable progressive disclosure skill in .agents/skills/ to run this multi-step verification in 1 trigger.',
-      whatItAchieves: `Encapsulates the ${toolCount} tool invocations from Turn #${turn.turnNumber} into a bounded skill.`,
-      payload: {
-        skillName: `verify-turn-${turn.turnNumber}`,
-        trigger: `$verify-turn-${turn.turnNumber}`,
-        instructions: `# Turn #${turn.turnNumber} Verification Skill\nExecute focused checks with minimal output payload:\n` +
-          (turn.toolCalls || []).slice(0, 3).map(t => `- ${t.tool}: ${formatToolArg(t.input)}`).join('\n')
-      }
-    });
-  }
-
   // Action: Reasoning optimization
   if (hasRoutineHighThinking) {
     actions.push({
@@ -146,6 +126,30 @@ function getTurnActions(turn) {
 
 function isActionableTurn(turn) {
   return getTurnActions(turn).length > 0;
+}
+
+function hasDenseWorkflow(turn) {
+  return (turn?.toolCalls?.length || 0) >= 4;
+}
+
+function shouldOfferIssueReport(turn) {
+  return isActionableTurn(turn) || hasDenseWorkflow(turn);
+}
+
+function buildSkillProposal(turn) {
+  const tools = [...new Set((turn?.toolCalls || []).map((tool) => tool.tool).filter(Boolean))].slice(0, 6);
+  const intent = String(turn?.userPrompt || 'the observed workflow').replace(/\s+/g, ' ').trim().slice(0, 160);
+  const name = `workflow-turn-${turn?.turnNumber || 1}`;
+
+  return `## 5. Proposed Reusable Skill (Review Before Creating)
+
+This is a description for review, not a request to create a skill automatically.
+
+- **Suggested name**: \`${name}\`
+- **Suggested trigger**: \`$${name}\`
+- **Description**: Reusable workflow for “${intent || 'the observed workflow'}” using ${tools.length ? tools.map((tool) => `\`${tool}\``).join(', ') : 'the observed tool sequence'}.
+- **Create it only when**: the same workflow recurs across multiple sessions and its steps can be stated without copying turn-specific paths, commands, or temporary context.
+- **Before creating it**: replace this proposal with a narrow purpose, stable inputs, and the smallest safe validation sequence.`;
 }
 
 async function handleApplyTurnAction(turn, action) {
@@ -273,6 +277,7 @@ function generateDocForTurn(turn) {
   let badExample = 'Running unconstrained file reads or unbounded searches without line ranges.';
   let goodExample = 'Using grep_search with StartLine/EndLine slices or targeted symbol inspection.';
   let resolutionRules = `- Practice progressive disclosure: always inspect targeted line ranges (StartLine/EndLine) rather than reading entire files into prompt context.`;
+  let skillProposal = '';
 
   if (hasNoisyTests) {
     problemHeadline = 'Unfiltered Test Suite Console Noise';
@@ -302,6 +307,7 @@ function generateDocForTurn(turn) {
     badExample = 'Prompting multi-phase architectural chores across sequential tool calls in a single unbounded turn.';
     goodExample = 'Packaging the verification sequence into a modular `.agents/skills/verify-slice/SKILL.md` skill.';
     resolutionRules = `- Package repetitive multi-turn test/lint workflows into modular \`.agents/skills/\`.\n- Allow automatic invocation only for narrow, broadly safe skills with a clear trigger; keep broad or specialized skills explicit-only.`;
+    skillProposal = buildSkillProposal(turn);
   }
 
   const agentPrompt = `Please inspect and resolve the token inefficiency documented in @docs/tokens-consumptions/issues/${fileName}. Apply the recommended rules to AGENTS.md or package.json, verify with silent flags, and ensure all changes preserve documentation integrity.`;
@@ -391,7 +397,7 @@ npm run test:agent || npm test -- --bail 1 --silent
 
 ---
 
-## 5. Concrete Code Examples
+${skillProposal ? `---\n\n${skillProposal}\n\n` : ''}## ${skillProposal ? '6' : '5'}. Concrete Code Examples
 
 ### ❌ Inefficient Pattern (Observed in Turn #${turnNum}):
 ${badExample}
@@ -413,7 +419,7 @@ ${goodExample}
 }
 
 function openSingleTurnPreview(turn) {
-  if (!isActionableTurn(turn)) return;
+  if (!shouldOfferIssueReport(turn)) return;
   const item = generateDocForTurn(turn);
   previewItems.value = [item];
   activePreviewIndex.value = 0;
@@ -424,7 +430,7 @@ function openSingleTurnPreview(turn) {
 
 function openAllTurnsPreview() {
   const allTurns = props.session?.turns || [];
-  const candidates = allTurns.filter(isActionableTurn);
+  const candidates = allTurns.filter(shouldOfferIssueReport);
   if (candidates.length === 0) return;
 
   previewItems.value = candidates.map(t => generateDocForTurn(t));
@@ -729,7 +735,7 @@ function formatToolArg(input) {
           <span class="session-path mono text-dim text-xs">{{ session?.meta?.cwd || '' }} • {{ session?.meta?.model || 'codex' }} • {{ session?.sessionId }}</span>
         </div>
         <div class="head-actions">
-          <div v-if="actionableTurnCount > 0" class="action-btn-group">
+            <div v-if="reportableTurnCount > 0" class="action-btn-group">
             <button 
               class="btn btn-secondary btn-sm"
               @click="openAllTurnsPreview"
@@ -1020,9 +1026,9 @@ function formatToolArg(input) {
           </div>
 
           <!-- In-Turn Actions & Guidance Logger Section -->
-          <div v-if="isActionableTurn(turn)" class="turn-actions-card">
+          <div v-if="shouldOfferIssueReport(turn)" class="turn-actions-card">
             <div class="turn-actions-header">
-              <span class="turn-actions-title">⚡ Turn #{{ turn.turnNumber }} Actions & Guidance:</span>
+              <span class="turn-actions-title">{{ isActionableTurn(turn) ? `⚡ Turn #${turn.turnNumber} Actions & Guidance:` : `🧩 Turn #${turn.turnNumber} Workflow Review:` }}</span>
               <button 
                 class="btn-text-sm"
                 @click="activeNoteTurn === turn.turnNumber ? activeNoteTurn = null : openTurnNote(turn)"
@@ -1071,14 +1077,14 @@ function formatToolArg(input) {
                     @click="openSingleTurnPreview(turn)"
                   >
                     <span class="btn-action-badge">Docs Issue</span>
-                    <span class="btn-action-text">📄 Preview & Generate Issue Report</span>
+                    <span class="btn-action-text">{{ hasDenseWorkflow(turn) && !isActionableTurn(turn) ? '🧩 Preview Workflow Skill Proposal' : '📄 Preview & Generate Issue Report' }}</span>
                     <span v-if="generatedIssues[turn.turnNumber]?.status === 'success'" class="text-green">✅ Saved Issue</span>
                   </button>
                   <Tooltip
                     placement="top"
                     title="Preview & Generate Single Turn Issue"
-                    text="Opens an interactive preview of the generated Markdown issue document and agent prompt for this turn, allowing you to edit it in real-time before copying or saving to docs/tokens-consumptions/issues/."
-                    whyItMatters="Lets you inspect and modify the telemetry diagnosis and agent prompt before handing off."
+                    text="Opens an editable issue report. Dense workflows include a skill proposal for review, but never create a skill automatically."
+                    whyItMatters="Keeps one-off or turn-specific commands out of reusable skills while preserving a useful solution proposal."
                   />
                 </div>
 

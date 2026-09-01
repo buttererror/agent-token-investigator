@@ -191,34 +191,30 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
 
   let noisyTestTurns = 0;
   let noisyFileTurns = 0;
-  let wastedTokensTest = 0;
-  let wastedTokensFile = 0;
+  let testAffectedInputTokens = 0;
+  let fileAffectedInputTokens = 0;
   let routineHighReasoningTurns = 0;
   let routineHighReasoningTokens = 0;
   let bloatedSessionsCount = 0;
-  let wastedTokensBloat = 0;
+  let lateTurnInputTokens = 0;
 
   for (const session of targetSessions) {
-    const isLongSession = session.turnCount > 12 || (session.totalUsage?.input_tokens > 200000);
+    const isLongSession = session.turnCount > 12;
     if (isLongSession) {
       bloatedSessionsCount++;
-      wastedTokensBloat += Math.round((session.totalUsage?.input_tokens || 0) * 0.4);
     }
 
     for (const turn of (session.turns || [])) {
-      if (turn.tokenUsage?.input_tokens > 80000 && turn.turnNumber > 8) {
-        wastedTokensBloat += Math.round(turn.tokenUsage.input_tokens * 0.35);
-      }
+      const inputTokens = turn.tokenUsage?.input_tokens || 0;
+      const noisyTests = (turn.toolCalls || []).filter(isNoisyTestInvocation);
+      const unboundedReads = (turn.toolCalls || []).filter(isUnboundedFileRead);
 
-      for (const tool of (turn.toolCalls || [])) {
-        if (isNoisyTestInvocation(tool)) {
-          noisyTestTurns++;
-          wastedTokensTest += 22000;
-        }
-        if (isUnboundedFileRead(tool)) {
-          noisyFileTurns++;
-          wastedTokensFile += 7500;
-        }
+      noisyTestTurns += noisyTests.length;
+      noisyFileTurns += unboundedReads.length;
+      if (noisyTests.length > 0) testAffectedInputTokens += inputTokens;
+      if (unboundedReads.length > 0) fileAffectedInputTokens += inputTokens;
+      if (turn.turnNumber > 12) {
+        lateTurnInputTokens += inputTokens;
       }
 
       const reasoningTokens = turn.tokenUsage?.reasoning_output_tokens || 0;
@@ -227,6 +223,16 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
         routineHighReasoningTokens += reasoningTokens;
       }
     }
+  }
+
+  function measuredImpact(label, tokens, description) {
+    return {
+      label,
+      tokens,
+      sharePercent: totalTokensInScope > 0 ? Math.round((tokens / totalTokensInScope) * 100) : null,
+      description,
+      validation: 'Token savings are not inferred from this signal. Compare matching before/after runs to measure the effect of a change.'
+    };
   }
 
   const guidanceRecords = loadGuidanceRecords();
@@ -248,27 +254,17 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
 
   // Diagnostic 1: Test & Terminal Command Payload Noise
   if (noisyTestTurns > 0) {
-    const totalWasted = wastedTokensTest;
-    const quotaPercent = Math.min(Math.round((totalWasted / 250000) * 100), 85);
-
     const diag = {
       id: 'diag-test-noise',
       category: 'PAYLOAD_NOISE',
       severity: 'HIGH',
       title: 'Unfiltered Test Suite Console Noise',
       headline: `Detected ${noisyTestTurns} test command(s) without both --bail 1 and --silent within ${scopeLabel}.`,
-      quantifiedWaste: {
-        tokensWasted: totalWasted,
-        quotaPercent,
-        projectedWeeklySavings: totalWasted * 4,
-        description: `Test runs dumped ~${totalWasted.toLocaleString()} unnecessary tokens into context, consuming ~${quotaPercent}% of your 5-hour rate limit.`
-      },
-      whatIfSimulation: {
-        beforeTokens: totalWasted,
-        afterTokens: Math.round(totalWasted * 0.03),
-        savedPercent: 97,
-        forecast: `Applying a lean test runner will drop test token consumption from ${totalWasted.toLocaleString()} tokens down to ~${Math.round(totalWasted * 0.03).toLocaleString()} tokens per run.`
-      },
+      measuredImpact: measuredImpact(
+        'Input context in affected turns',
+        testAffectedInputTokens,
+        'These are all recorded input tokens in turns containing a test command without both quiet flags; telemetry does not isolate console output from other turn context.'
+      ),
       actions: [
         {
           actionId: 'action-pkg-script',
@@ -278,7 +274,7 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
           title: 'Action 2: Inject "test:agent" Lean Script to package.json',
           description: 'Adds a dedicated agent test script with --bail 1 and --silent flags to halt output on first error.',
           whatItDoes: 'Modifies your package.json to add: "test:agent": "vitest run --bail=1 --silent" (or jest equivalent).',
-          whatItAchieves: 'Prevents 50 passing tests and console logs from cluttering your prompt context. Trims token payload by 97%.',
+          whatItAchieves: 'Keeps verification output focused. Confirm any token reduction with a comparable future run.',
           targetFile: 'package.json',
           payload: {
             scriptName: 'test:agent',
@@ -299,22 +295,6 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
             ruleText: '\n- When executing test suites, always pass `--bail 1` and suppress non-failing logs to keep context lean.'
           }
         },
-        {
-          actionId: 'action-skill-test',
-          systemId: 3,
-          isRecommended: false,
-          badge: 'Modular Preset',
-          title: 'Action 3: Generate "$verify-slice" Project Skill',
-          description: 'Creates a self-contained testing skill in .agents/skills/verify-slice/SKILL.md.',
-          whatItDoes: 'Packages test, lint, and typecheck into a single reusable 400-token prompt preset.',
-          whatItAchieves: 'Eliminates repetitive multi-turn conversational verifications.',
-          targetFile: '.agents/skills/verify-slice/SKILL.md',
-          payload: {
-            skillName: 'verify-slice',
-            trigger: '$verify-slice',
-            instructions: '# Verify Slice Skill\nRun compact test and lint checks with `--bail 1` and summarize only failing assertions.'
-          }
-        }
       ]
     };
 
@@ -323,27 +303,17 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
 
   // Diagnostic 2: Full-File Loading vs Targeted Slices
   if (noisyFileTurns > 0) {
-    const totalWasted = wastedTokensFile;
-    const quotaPercent = Math.min(Math.round((totalWasted / 250000) * 100), 55);
-
     const diag = {
       id: 'diag-file-reads',
       category: 'CONTEXT_BLOAT',
       severity: 'MEDIUM',
       title: 'Unbounded File Read Requests',
       headline: `Detected ${noisyFileTurns} file read request(s) without line-range metadata in ${scopeLabel}.`,
-      quantifiedWaste: {
-        tokensWasted: totalWasted,
-        quotaPercent,
-        projectedWeeklySavings: totalWasted * 5,
-        description: `Unbounded file read requests are estimated to have consumed ~${totalWasted.toLocaleString()} tokens across turns, taking ~${quotaPercent}% of your 5-hour quota.`
-      },
-      whatIfSimulation: {
-        beforeTokens: totalWasted,
-        afterTokens: Math.round(totalWasted * 0.2),
-        savedPercent: 80,
-        forecast: `Switching to targeted grep_search and line ranges saves ~80% of file inspection tokens.`
-      },
+      measuredImpact: measuredImpact(
+        'Input context in affected turns',
+        fileAffectedInputTokens,
+        'These are all recorded input tokens in turns containing an unbounded file-read request; telemetry does not expose the exact file output size.'
+      ),
       actions: [
         {
           actionId: 'action-agent-rule-file',
@@ -353,7 +323,7 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
           title: 'Action 1: Inject Grep/Range Rule into AGENTS.md',
           description: 'Appends a permanent rule requiring Codex to inspect specific line ranges for files >100 lines.',
           whatItDoes: 'Appends: "- When inspecting files >100 lines, use grep_search or specify StartLine/EndLine ranges."',
-          whatItAchieves: 'Permanently stops the agent from dumping 800+ lines into context when only 20 lines are needed.',
+          whatItAchieves: 'Makes future file requests bounded; verify the effect against a comparable later investigation.',
           targetFile: 'AGENTS.md',
           payload: {
             ruleText: '\n- For files over 100 lines, use `grep_search` or specify `StartLine`/`EndLine` ranges on `view_file` instead of reading the entire file.'
@@ -380,28 +350,18 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
   }
 
   // Diagnostic 3: Long-Running Thread Fatigue
-  if (bloatedSessionsCount > 0 || wastedTokensBloat > 0) {
-    const totalWasted = Math.max(wastedTokensBloat, 60000);
-    const quotaPercent = Math.min(Math.round((totalWasted / 250000) * 100), 75);
-
+  if (bloatedSessionsCount > 0) {
     const diag = {
       id: 'diag-session-fatigue',
       category: 'SESSION_FATIGUE',
       severity: 'HIGH',
       title: 'Context Fatigue & Long Thread Carryover',
       headline: `${bloatedSessionsCount} session(s) exceeded 12+ turns carrying over heavy prompt history in ${scopeLabel}.`,
-      quantifiedWaste: {
-        tokensWasted: totalWasted,
-        quotaPercent,
-        projectedWeeklySavings: totalWasted * 3,
-        description: `Historical conversation carryover cost ~${totalWasted.toLocaleString()} tokens. Every follow-up re-pays for old history.`
-      },
-      whatIfSimulation: {
-        beforeTokens: totalWasted,
-        afterTokens: Math.round(totalWasted * 0.15),
-        savedPercent: 85,
-        forecast: `Exporting a state-preserving handoff and opening a fresh thread reduces turn cost from 120k to 5k tokens.`
-      },
+      measuredImpact: measuredImpact(
+        'Input context after turn 12',
+        lateTurnInputTokens,
+        'These are the recorded input tokens for turns after the session-length threshold, not a measured amount of avoidable waste.'
+      ),
       actions: [
         {
           actionId: 'action-handoff-export',
@@ -411,7 +371,7 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
           title: 'Action 4: Export State-Preserving Session Handoff',
           description: 'Auto-extracts completed goals, modified files, and remaining steps into a 1-paragraph restart prompt.',
           whatItDoes: 'Compiles a structured markdown handoff summary with modified file references and next goals.',
-          whatItAchieves: 'Allows closing exhausted threads and restarting fresh without losing your train of thought, saving ~85% tokens.',
+          whatItAchieves: 'Creates a fresh starting point while preserving task state; measure subsequent input tokens to evaluate the effect.',
           targetFile: 'Clipboard / Handoff Modal',
           payload: {
             actionType: 'OPEN_HANDOFF_MODAL'
@@ -445,18 +405,11 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
     severity: 'LOW',
     title: 'Reasoning Effort & Task Right-Sizing',
     headline: `Detected ${routineHighReasoningTurns} likely routine turn(s) with high reasoning-token use in ${scopeLabel}.`,
-    quantifiedWaste: {
-      tokensWasted: routineHighReasoningTokens,
-      quotaPercent: Math.min(Math.round((routineHighReasoningTokens / 250000) * 100), 85),
-      projectedWeeklySavings: routineHighReasoningTokens * 4,
-      description: 'Likely routine work used high reasoning-token volume; confirm task complexity before lowering effort.'
-    },
-    whatIfSimulation: {
-      beforeTokens: routineHighReasoningTokens,
-      afterTokens: Math.round(routineHighReasoningTokens * 0.12),
-      savedPercent: 88,
-      forecast: 'Using low reasoning effort for chores saves ~22,000 reasoning tokens per week for complex debugging.'
-    },
+    measuredImpact: measuredImpact(
+      'Reasoning tokens in likely routine turns',
+      routineHighReasoningTokens,
+      'These are directly recorded reasoning tokens. Whether they were avoidable depends on the actual task complexity.'
+    ),
     actions: [
       {
         actionId: 'action-right-sizing',
@@ -466,7 +419,7 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
         title: 'Action 6: Apply Reasoning Effort Right-Sizing Guidance',
         description: 'Set default reasoning_effort to "low" for routine tasks and "high" only for architecture.',
         whatItDoes: 'Adds clear reasoning level expectations into your workflow and config.',
-        whatItAchieves: 'Preserves 30-40% more quota headroom for difficult debugging tasks.',
+        whatItAchieves: 'Reserves higher reasoning effort for work that needs it; compare similar tasks before changing the default.',
         targetFile: 'AGENTS.md',
         payload: {
           ruleText: '\n- Use `reasoning_effort: low` for routine chores, docs, and formatting; reserve `high` for deep architectural refactors.'
