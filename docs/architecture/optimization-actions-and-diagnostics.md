@@ -51,3 +51,19 @@ Every generated markdown file contains:
 4. **Header Issue Manager (`📋 Issues (docs/)`)**:
    - Displays all active issue work orders in the project.
    - Provides 1-click **"Copy Agent Handoff Prompt"**, markdown preview, and issue cleanup.
+
+---
+
+## 4. Interactive Same-Day 5-Hour Time Slice Filtering
+
+The diagnostic engine supports granular same-day time filtering to pinpoint token consumption during specific working blocks:
+- **Preset Windows**: Fast toggling between `Latest 5 Hours`, `00:00–05:00`, `05:00–10:00`, `08:00–13:00`, `10:00–15:00`, `12:00–17:00`, `14:00–19:00`, `17:00–22:00`, and `19:00–24:00`.
+- **Start Hour Range Slider**: Drag the slider (`0:00` to `19:00`) to dynamically slice timestamps across `[YYYY-MM-DDTstartHour:00:00, YYYY-MM-DDT(startHour+5):00:00]` and immediately view localized waste diagnostics.
+
+---
+
+## 5. Guidance Log History Correlation & Status Flags
+
+The analyzer automatically checks the active repository's Guidance History Log (`guidance-history.json`):
+- **`📜 Added from Guidance Log`**: Displayed on diagnostic banner headers and tab buttons when a rule or script in that diagnostic was previously applied and recorded in project history.
+- **`📜 Logged in History`**: Displayed on individual action cards next to `✅ Rule Active in Project`, with a hover tooltip displaying the log record's author, description, and date.

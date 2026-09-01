@@ -27,28 +27,33 @@ node cli.js
    - 5-Hour rolling window usage percentage with live countdown until reset.
    - Real-time token burn velocity (tokens/min) and exhaustion forecast.
 
-2. **Guided Optimization Advisor (What-If Simulation)**:
+2. **Guided Optimization Advisor & What-If Simulator**:
+   - Section-scoped time filtering: **All Time**, **Same-Day 5-Hour Slices** (with interactive start-hour slider), and **7-Day Rolling Week**.
    - Quantified waste calculation for every detected issue (e.g. *"Heavy test dumps cost 65,000 tokens — 26% of 5-hour quota"*).
-   - Multi-option action selector with the **Recommended Fix** highlighted on top.
+   - **Guidance Log History Reflection**: Diagnostic cards and action buttons automatically detect and flag when a rule or script was previously recorded in project history (`📜 Added from Guidance Log`, `📜 Logged in History`).
    - 1-Click direct file application to `AGENTS.md` and `package.json` with **Instant Undo/Rollback**.
 
-3. **Session Explorer & Turn-by-Turn Inspector**:
-   - Filter and search past threads with health scores (🟢 Lean, 🟡 Bloated, 🔴 Noisy).
-   - Hoverable tooltips defining **`In:`** (Total Input Context), **`Cache:`** (Prompt Cached), **`Think:`** (Reasoning/Chain-of-thought), and **`Out:`** (Model Output).
-   - **`📑 Generate docs/ Issues`**: Automatically scans the session and writes structured Markdown post-mortem issue reports into `docs/tokens-consumptions/issues/` for heavy/problematic turns (`>15k` fresh un-cached tokens, noise spikes, or `≥3` tool calls).
+3. **`docs/` Issue Handoff Manager (Autonomous Agent Work Orders)**:
+   - Dedicated mechanism to package diagnostic findings and turn spikes into structured Markdown work orders in `docs/tokens-consumptions/issues/`.
+   - **1-Click Copy Agent Prompt**: Produces a ready-to-paste instruction for Codex, Antigravity, or Claude Code (`"Please resolve @docs/tokens-consumptions/issues/issue-*.md"`).
+   - Integrated in-app Issue Manager (`📋 Issues (docs/)` in header) to browse, preview, and clean up active work orders.
 
-4. **Multi-Project Scope & File System Browser**:
+4. **Multi-Agent Extensibility (Codex & Antigravity)**:
+   - Ingests trajectories from OpenAI Codex (`~/.codex/sessions/`) and Google Antigravity (`~/.gemini/antigravity/brain/`).
+   - **1-Click Agent Switcher (`HeaderNav.vue`)**: Toggle between `⚡ All`, `🤖 Codex`, and `🌌 Antigravity` instantly.
+
+5. **Multi-Project Scope & File System Browser**:
    - Switch between repositories dynamically or view aggregate metrics across all projects.
    - Built-in **Directory Explorer (`📁+`)** allowing you to browse your local computer and add any codebase with automatic detection of Node.js, Python, Rust, Go, Git, and `AGENTS.md`.
 
-5. **Pre-Flight Prompt Token Linter**:
+6. **Pre-Flight Prompt Token Linter**:
    - Interactive scratchpad to test draft prompts for token expansion risks before sending to an agent.
    - Generates token-lean rewrites with estimated token savings.
 
-6. **State-Preserving Session Handoff Compiler**:
+7. **State-Preserving Session Handoff Compiler**:
    - Extracts task goals, modified files, and last decisions from bloated threads into a clean 1-paragraph prompt to resume in a fresh session saving ~85% input tokens.
 
-7. **Educational Tooltip & Glossary System**:
+8. **Educational Tooltip & Glossary System**:
    - Hoverable `ℹ️` tooltips on every metric, button, and action.
    - Slide-out **Agent Token Guide & Glossary** drawer explaining *Cached Input*, *Reasoning Tokens*, *5-Hour Limits*, *Payload Noise*, and *Progressive Disclosure*.
 
