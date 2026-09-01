@@ -1,5 +1,40 @@
 import fs from 'fs';
 import path from 'path';
+import { loadGuidanceRecords } from './guidanceLogger.js';
+
+/**
+ * Checks if an action was added / recorded in guidance history logs
+ */
+export function checkActionFromLogs(targetProjectPath, action, records = []) {
+  if (!targetProjectPath || !records || records.length === 0) return { isFromLogs: false, logRecord: null };
+  const targetNorm = path.resolve(targetProjectPath).replace(/[\/\\]+$/, '').toLowerCase();
+  
+  const match = records.find(r => {
+    const rPath = path.resolve(r.projectPath || '').replace(/[\/\\]+$/, '').toLowerCase();
+    if (rPath !== targetNorm && targetNorm !== 'all' && !rPath.includes(targetNorm) && !targetNorm.includes(rPath)) {
+      return false;
+    }
+    
+    if (action.targetFile && r.targetFile && (r.targetFile.includes(action.targetFile) || action.targetFile.includes(path.basename(r.targetFile)))) {
+      return true;
+    }
+    if (action.payload?.ruleText && r.what && (r.what.toLowerCase().includes('agent') || r.what.toLowerCase().includes('rule'))) {
+      return true;
+    }
+    if (action.payload?.scriptName && r.what && r.what.includes(action.payload.scriptName)) {
+      return true;
+    }
+    if (action.payload?.skillName && r.what && r.what.includes(action.payload.skillName)) {
+      return true;
+    }
+    return false;
+  });
+
+  return {
+    isFromLogs: Boolean(match),
+    logRecord: match || null
+  };
+}
 
 /**
  * Checks if a project already has a specific rule or script applied
@@ -149,6 +184,23 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
     }
   }
 
+  const guidanceRecords = loadGuidanceRecords();
+
+  function annotateDiagnostic(diag) {
+    if (targetProjectPath) {
+      let anyAddedFromLogs = false;
+      diag.actions.forEach(act => {
+        act.isAlreadyApplied = checkActionStatus(targetProjectPath, act);
+        const { isFromLogs, logRecord } = checkActionFromLogs(targetProjectPath, act, guidanceRecords);
+        act.isAddedFromLogs = isFromLogs;
+        act.logRecord = logRecord;
+        if (isFromLogs) anyAddedFromLogs = true;
+      });
+      diag.isAddedFromLogs = anyAddedFromLogs;
+    }
+    return diag;
+  }
+
   // Diagnostic 1: Test & Terminal Command Payload Noise
   if (noisyTestTurns > 0 || wastedTokensTest > 0 || targetSessions.length > 0) {
     const totalWasted = Math.max(wastedTokensTest, targetSessions.length > 0 ? 35000 : 0);
@@ -221,14 +273,7 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
       ]
     };
 
-    // Check if actions are already active
-    if (targetProjectPath) {
-      diag.actions.forEach(act => {
-        act.isAlreadyApplied = checkActionStatus(targetProjectPath, act);
-      });
-    }
-
-    diagnostics.push(diag);
+    diagnostics.push(annotateDiagnostic(diag));
   }
 
   // Diagnostic 2: Full-File Loading vs Targeted Slices
@@ -286,13 +331,7 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
       ]
     };
 
-    if (targetProjectPath) {
-      diag.actions.forEach(act => {
-        act.isAlreadyApplied = checkActionStatus(targetProjectPath, act);
-      });
-    }
-
-    diagnostics.push(diag);
+    diagnostics.push(annotateDiagnostic(diag));
   }
 
   // Diagnostic 3: Long-Running Thread Fatigue
@@ -350,13 +389,7 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
       ]
     };
 
-    if (targetProjectPath) {
-      diag.actions.forEach(act => {
-        act.isAlreadyApplied = checkActionStatus(targetProjectPath, act);
-      });
-    }
-
-    diagnostics.push(diag);
+    diagnostics.push(annotateDiagnostic(diag));
   }
 
   // Diagnostic 4: Reasoning Effort Right-Sizing
@@ -396,13 +429,7 @@ export function runDiagnostics(sessions, overviewMetrics, filterOptions = {}, ta
     ]
   };
 
-  if (targetProjectPath) {
-    diagReasoning.actions.forEach(act => {
-      act.isAlreadyApplied = checkActionStatus(targetProjectPath, act);
-    });
-  }
-
-  diagnostics.push(diagReasoning);
+  diagnostics.push(annotateDiagnostic(diagReasoning));
 
   return {
     scope: {

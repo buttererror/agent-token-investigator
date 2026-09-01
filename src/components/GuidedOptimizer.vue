@@ -298,6 +298,7 @@ onMounted(() => {
         @click="activeDiagnosticIndex = idx"
       >
         {{ diag.title }}
+        <span v-if="diag.isAddedFromLogs" class="tab-log-indicator" title="Rule/action recorded in guidance history">📜</span>
       </button>
     </div>
 
@@ -312,6 +313,9 @@ onMounted(() => {
       <div class="diag-banner">
         <div class="banner-top">
           <span class="badge badge-yellow">⚠️ Detected Inefficiency</span>
+          <span v-if="localDiagnostics[activeDiagnosticIndex].isAddedFromLogs" class="badge badge-purple" title="Rule or action was recorded in Guidance Log">
+            📜 Added from Guidance Log
+          </span>
           <h4 class="diag-title">{{ localDiagnostics[activeDiagnosticIndex].title }}</h4>
         </div>
         <p class="diag-headline">{{ localDiagnostics[activeDiagnosticIndex].headline }}</p>
@@ -369,6 +373,9 @@ onMounted(() => {
                 />
               </div>
               <div class="action-top-right">
+                <span v-if="action.isAddedFromLogs" class="badge badge-purple" :title="'Recorded in guidance log: ' + (action.logRecord?.what || '')">
+                  📜 Logged in History
+                </span>
                 <span v-if="action.isAlreadyApplied" class="badge badge-green">✅ Rule Active in Project</span>
                 <span class="target-tag mono">{{ action.targetFile }}</span>
               </div>
@@ -676,6 +683,11 @@ onMounted(() => {
   background: rgba(56, 189, 248, 0.15);
   color: var(--accent-blue);
   border-color: var(--accent-blue);
+}
+
+.tab-log-indicator {
+  font-size: 0.7rem;
+  margin-left: 4px;
 }
 
 .diag-loading {
