@@ -32,8 +32,10 @@ const {
   error,
   selectedSession,
   activeWorkspace,
+  activeAgent,
   isAutoRefresh,
   setWorkspace,
+  setAgent,
   addProject,
   removeProject,
   fetchGuidanceRecords,
@@ -83,6 +85,10 @@ function handleWorkspaceChange(newPath) {
   fetchIssuesCount(newPath);
 }
 
+function handleAgentChange(newAgent) {
+  setAgent(newAgent);
+}
+
 function handleProjectAdded(newProj) {
   setWorkspace(newProj.path);
   fetchIssuesCount(newProj.path);
@@ -114,6 +120,7 @@ onMounted(() => {
     <!-- Header Navigation with Project Selector & Guidance Log -->
     <HeaderNav 
       :active-workspace="activeWorkspace"
+      :active-agent="activeAgent"
       :projects="projects"
       :records-count="guidanceRecords.length"
       :issues-count="issuesCount"
@@ -126,6 +133,7 @@ onMounted(() => {
       @open-project-selector="isProjectSelectorOpen = true"
       @open-issues="isIssuesOpen = true"
       @change-workspace="handleWorkspaceChange"
+      @change-agent="handleAgentChange"
     />
 
     <!-- Main Content -->
