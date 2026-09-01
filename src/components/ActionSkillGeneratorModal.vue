@@ -14,15 +14,13 @@ const props = defineProps({
   }
 });
 
-defineEmits(['close']);
+const emit = defineEmits(['close', 'skill-created']);
 
 const { isApplying, feedbackMessage, feedbackType, applyAction } = useActionSelector();
 
 const skillName = ref('verify-slice');
 const trigger = ref('$verify-slice');
-const instructions = ref(`# Verify Slice Skill
-
-Run compact automated checks and git status with minimal noise:
+const instructions = ref(`Run compact automated checks and git status with minimal noise:
 
 \`\`\`bash
 pnpm test -- --bail 1 --silent
@@ -32,38 +30,48 @@ git status --short
 
 Summarize only failing assertions or uncommitted files.`);
 
+const isSuccess = ref(false);
+
 async function handleCreate() {
   const action = {
     systemId: 3,
+    targetFile: `.agents/skills/${skillName.value}/SKILL.md`,
     payload: {
       skillName: skillName.value,
       trigger: trigger.value,
       instructions: instructions.value
     }
   };
-  await applyAction(action, props.activeWorkspace);
+  
+  try {
+    await applyAction(action, props.activeWorkspace);
+    isSuccess.value = true;
+    emit('skill-created');
+  } catch (err) {
+    isSuccess.value = false;
+  }
 }
 </script>
 
 <template>
   <div v-if="isOpen" class="modal-overlay" @click="$emit('close')">
-    <div class="modal-card" @click.stop>
+    <div class="modal-card skill-modal" @click.stop>
       <div class="modal-head">
         <div class="head-info">
           <h3>📦 Project Skill Generator</h3>
-          <span class="sub-text">Package repeated multi-turn workflows into a single 400-token prompt preset</span>
+          <span class="sub-text">Package repeated multi-turn workflows into a single prompt preset</span>
         </div>
         <button class="close-btn" @click="$emit('close')">✕</button>
       </div>
 
       <div class="skill-gen-body">
         <div class="benefit-box">
-          <span>💡 <strong>Progressive Disclosure:</strong> Skills stored in <code>.agents/skills/</code> are only loaded when triggered with <code>{{ trigger }}</code>, preventing unnecessary baseline prompt bloat.</span>
+          <span>💡 <strong>Progressive Disclosure:</strong> Skills stored in <code>.agents/skills/</code> are only loaded when triggered with <code>{{ trigger }}</code>, keeping baseline token cost at zero until invoked.</span>
         </div>
 
         <div class="form-grid">
           <div class="form-group">
-            <label>Skill Name (Folder Name):</label>
+            <label>Skill Folder Name:</label>
             <input v-model="skillName" class="form-input mono" placeholder="e.g. verify-slice" />
           </div>
 
@@ -75,16 +83,19 @@ async function handleCreate() {
 
         <div class="form-group" style="margin-top: 14px;">
           <label>Workflow Instructions (`SKILL.md`):</label>
-          <textarea v-model="instructions" class="form-textarea mono" rows="7"></textarea>
+          <textarea v-model="instructions" class="form-textarea mono" rows="8"></textarea>
         </div>
 
         <div v-if="feedbackMessage" :class="['feedback-bar', `feedback-${feedbackType}`]">
-          {{ feedbackMessage }}
+          <span>{{ feedbackMessage }}</span>
         </div>
 
         <div class="modal-footer">
+          <button class="btn btn-secondary" @click="$emit('close')">
+            {{ isSuccess ? 'Done' : 'Cancel' }}
+          </button>
           <button class="btn btn-primary" :disabled="isApplying" @click="handleCreate">
-            <span>🚀</span> Create Skill in {{ activeWorkspace }}
+            <span>🚀</span> {{ isApplying ? 'Generating...' : (isSuccess ? 'Re-Generate Skill' : 'Create Skill in ' + activeWorkspace.split('/').pop()) }}
           </button>
         </div>
       </div>
@@ -93,6 +104,10 @@ async function handleCreate() {
 </template>
 
 <style scoped>
+.skill-modal {
+  max-width: 650px;
+}
+
 .modal-head {
   display: flex;
   justify-content: space-between;
@@ -154,9 +169,10 @@ async function handleCreate() {
 }
 
 .modal-footer {
-  margin-top: 16px;
+  margin-top: 18px;
   display: flex;
   justify-content: flex-end;
+  gap: 10px;
 }
 
 .feedback-bar {
@@ -169,10 +185,12 @@ async function handleCreate() {
 .feedback-success {
   background-color: rgba(34, 197, 94, 0.15);
   color: var(--accent-green);
+  border: 1px solid rgba(34, 197, 94, 0.3);
 }
 
 .feedback-error {
   background-color: rgba(239, 68, 68, 0.15);
   color: var(--accent-red);
+  border: 1px solid rgba(239, 68, 68, 0.3);
 }
 </style>

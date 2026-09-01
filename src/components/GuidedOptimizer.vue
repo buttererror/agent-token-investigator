@@ -41,6 +41,9 @@ const editingAction = ref(null);
 const customRuleText = ref('');
 const customScriptName = ref('');
 const customScriptCmd = ref('');
+const customSkillName = ref('verify-slice');
+const customSkillTrigger = ref('$verify-slice');
+const customSkillInstructions = ref('');
 
 async function fetchLocalDiagnostics(scope = activeScopeMode.value, date = filterDate.value, sessionId = filterSessionId.value) {
   isDiagLoading.value = true;
@@ -94,6 +97,9 @@ function startEditing(action) {
   if (action.payload?.ruleText) customRuleText.value = action.payload.ruleText;
   if (action.payload?.scriptName) customScriptName.value = action.payload.scriptName;
   if (action.payload?.scriptCommand) customScriptCmd.value = action.payload.scriptCommand;
+  if (action.payload?.skillName) customSkillName.value = action.payload.skillName;
+  if (action.payload?.trigger) customSkillTrigger.value = action.payload.trigger;
+  if (action.payload?.instructions) customSkillInstructions.value = action.payload.instructions;
 }
 
 function cancelEditing() {
@@ -105,10 +111,6 @@ function openDiffPreview(action) {
     emit('open-handoff');
     return;
   }
-  if (action.systemId === 3 && !action.payload?.instructions) {
-    emit('open-skill-gen');
-    return;
-  }
   if (action.systemId === 5) {
     emit('open-linter');
     return;
@@ -118,6 +120,11 @@ function openDiffPreview(action) {
   if (editingAction.value?.actionId === action.actionId) {
     if (action.systemId === 1) customPayload = { ruleText: customRuleText.value };
     if (action.systemId === 2) customPayload = { scriptName: customScriptName.value, scriptCommand: customScriptCmd.value };
+    if (action.systemId === 3) customPayload = {
+      skillName: customSkillName.value || action.payload?.skillName,
+      trigger: customSkillTrigger.value || action.payload?.trigger,
+      instructions: customSkillInstructions.value || action.payload?.instructions
+    };
   }
 
   diffModalAction.value = action;
@@ -315,6 +322,14 @@ onMounted(() => {
                 <label style="margin-top: 8px;">Command Line:</label>
                 <input v-model="customScriptCmd" class="mono edit-input" />
               </div>
+              <div v-if="action.systemId === 3" class="edit-group">
+                <label>Skill Folder Name:</label>
+                <input v-model="customSkillName" class="mono edit-input" />
+                <label style="margin-top: 8px;">Trigger Mention:</label>
+                <input v-model="customSkillTrigger" class="mono edit-input" />
+                <label style="margin-top: 8px;">Skill Instructions (SKILL.md):</label>
+                <textarea v-model="customSkillInstructions" class="mono edit-textarea" rows="5"></textarea>
+              </div>
               <div class="edit-actions">
                 <button class="btn btn-primary btn-sm" :disabled="isApplying" @click="openDiffPreview(action)">
                   Preview & Apply
@@ -345,11 +360,11 @@ onMounted(() => {
               </button>
 
               <button 
-                v-if="!action.isAlreadyApplied && (action.systemId === 1 || action.systemId === 2)"
+                v-if="!action.isAlreadyApplied && (action.systemId === 1 || action.systemId === 2 || action.systemId === 3)"
                 class="btn btn-secondary btn-sm"
                 @click="startEditing(action)"
               >
-                <span>✏️</span> Edit Rule Text
+                <span>✏️</span> Customize
               </button>
             </div>
           </div>
@@ -392,7 +407,7 @@ onMounted(() => {
 
           <div class="diff-view card">
             <div class="diff-title mono">// {{ diffModalAction.targetFile }}</div>
-            <pre class="diff-code mono"><span class="diff-plus">+ {{ diffModalCustomPayload?.ruleText || diffModalAction.payload?.ruleText || (diffModalAction.payload?.scriptName ? `"${diffModalAction.payload.scriptName}": "${diffModalAction.payload.scriptCommand}"` : 'Skill / Rule Configuration') }}</span></pre>
+            <pre class="diff-code mono"><span class="diff-plus">+ {{ diffModalCustomPayload?.instructions || diffModalAction.payload?.instructions || diffModalCustomPayload?.ruleText || diffModalAction.payload?.ruleText || (diffModalAction.payload?.scriptName ? `"${diffModalAction.payload.scriptName}": "${diffModalAction.payload.scriptCommand}"` : 'Skill / Rule Configuration') }}</span></pre>
           </div>
 
           <div class="diff-notice">

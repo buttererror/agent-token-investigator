@@ -72,24 +72,37 @@ export function applyPackageScript(targetProjectPath, scriptName, scriptCommand)
 /**
  * Action 3: Create project skill in .agents/skills/
  */
-export function createProjectSkill(targetProjectPath, skillName, trigger, instructions) {
-  const skillDir = path.join(targetProjectPath, '.agents', 'skills', skillName);
+export function createProjectSkill(targetProjectPath, skillName = 'verify-slice', trigger = '$verify-slice', instructions = '') {
+  if (!skillName) {
+    throw new Error('Skill name is required');
+  }
+
+  const sanitizedSkillName = skillName.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+  const skillDir = path.join(targetProjectPath, '.agents', 'skills', sanitizedSkillName);
   const skillFile = path.join(skillDir, 'SKILL.md');
   const agentConfigFile = path.join(skillDir, 'agents', 'openai.yaml');
 
   fs.mkdirSync(path.join(skillDir, 'agents'), { recursive: true });
 
+  const backup = createBackup(skillFile);
+
+  // Extract clean 1-line description without markdown '#' symbols
+  const cleanDescription = (instructions || '')
+    .split('\n')
+    .map(line => line.replace(/^#+\s*/, '').trim())
+    .find(line => line.length > 0) || `Custom workflow skill for ${sanitizedSkillName}`;
+
   const skillContent = `---
-name: ${skillName}
-description: "${instructions.split('\n')[0] || skillName}"
+name: ${sanitizedSkillName}
+description: "${cleanDescription.replace(/"/g, "'")}"
 ---
 
-# ${skillName}
+# ${sanitizedSkillName} Skill
 
-Trigger: \`${trigger}\`
+Trigger with: \`${trigger || ('$' + sanitizedSkillName)}\`
 
-## Workflow
-${instructions}
+## Instructions & Workflow
+${instructions || '# Run checks with minimal noise'}
 `;
 
   const yamlContent = `policy:
@@ -103,7 +116,9 @@ ${instructions}
     success: true,
     action: 'CREATE_PROJECT_SKILL',
     targetDir: skillDir,
-    message: `Created skill in ${skillDir}`
+    targetFile: skillFile,
+    backup,
+    message: `Created skill "${sanitizedSkillName}" in ${skillFile}`
   };
 }
 
@@ -117,9 +132,6 @@ export function undoAction(backupId) {
   }
 
   const originalContent = fs.readFileSync(backupPath, 'utf8');
-  // Determine original file from backup name
-  const parts = backupId.split('-');
-  const fileName = parts.slice(2).join('-');
 
   return {
     success: true,
