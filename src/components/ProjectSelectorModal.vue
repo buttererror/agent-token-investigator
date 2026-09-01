@@ -290,13 +290,13 @@ onMounted(() => {
               Directory Path on Computer:
               <Tooltip 
                 title="Absolute Directory Path" 
-                text="Provide the full local filesystem path to your project (e.g. /home/ellol/my-new-app)." 
+                text="Provide the full local filesystem path to your project (e.g. ~/projects/my-new-app or /workspace/my-app)." 
               />
             </label>
             <input 
               v-model="manualPath"
               type="text" 
-              placeholder="/home/ellol/apps/my-project"
+              placeholder="/path/to/my-project"
               class="input-mono"
             />
           </div>

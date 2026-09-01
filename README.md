@@ -8,14 +8,14 @@ An intelligent, 100% local developer platform and CLI utility built with **Vue 3
 
 ### 1. Launch the Vue 3 Web Dashboard
 ```bash
-cd /home/ellol/apps/agent-token-tracker
+cd agent-token-tracker
 npm start
 ```
 Then open **[http://localhost:3333](http://localhost:3333)** in your browser.
 
 ### 2. Run the Terminal CLI Report
 ```bash
-cd /home/ellol/apps/agent-token-tracker
+cd agent-token-tracker
 node cli.js
 ```
 

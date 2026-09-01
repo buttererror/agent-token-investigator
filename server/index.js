@@ -67,7 +67,7 @@ app.get('/api/sessions/:id', async (req, res) => {
 // 4. Guided diagnostics with What-If simulation and date/scope filtering
 app.get('/api/diagnostics', async (req, res) => {
   try {
-    const { scope = 'all', date, sessionId, targetProjectPath = '/home/ellol/solutions/clinic-platform' } = req.query;
+    const { scope = 'all', date, sessionId, targetProjectPath = process.cwd() } = req.query;
     const sessions = await getAllSessions();
     const overview = await getOverviewMetrics(sessions);
     const result = runDiagnostics(sessions, overview, { scope, date, sessionId }, targetProjectPath);
@@ -121,7 +121,7 @@ app.post('/api/lint-prompt', (req, res) => {
 // 8. Live Verification Benchmark (Sequential vs. Skill)
 app.get('/api/run-benchmark', (req, res) => {
   try {
-    const { targetProjectPath = '/home/ellol/solutions/clinic-platform', contextSize = 174500 } = req.query;
+    const { targetProjectPath = process.cwd(), contextSize = 174500 } = req.query;
     const results = runVerificationBenchmark(targetProjectPath, parseInt(contextSize, 10) || 174500);
     res.json(results);
   } catch (err) {
@@ -132,7 +132,7 @@ app.get('/api/run-benchmark', (req, res) => {
 // 9. Action 1: Apply rule to AGENTS.md
 app.post('/api/apply-agents-rule', (req, res) => {
   try {
-    const { targetProjectPath = '/home/ellol/solutions/clinic-platform', ruleText, what, why, how, author } = req.body;
+    const { targetProjectPath = process.cwd(), ruleText, what, why, how, author } = req.body;
     const result = applyAgentsRule(targetProjectPath, ruleText, { what, why, how, author });
     res.json(result);
   } catch (err) {
@@ -143,7 +143,7 @@ app.post('/api/apply-agents-rule', (req, res) => {
 // 9. Action 2: Apply script to package.json
 app.post('/api/apply-package-script', (req, res) => {
   try {
-    const { targetProjectPath = '/home/ellol/solutions/clinic-platform', scriptName, scriptCommand, what, why, how, author } = req.body;
+    const { targetProjectPath = process.cwd(), scriptName, scriptCommand, what, why, how, author } = req.body;
     const result = applyPackageScript(targetProjectPath, scriptName, scriptCommand, { what, why, how, author });
     res.json(result);
   } catch (err) {
@@ -154,7 +154,7 @@ app.post('/api/apply-package-script', (req, res) => {
 // 10. Action 3: Create project skill
 app.post('/api/create-skill', (req, res) => {
   try {
-    const { targetProjectPath = '/home/ellol/solutions/clinic-platform', skillName, trigger, instructions, what, why, how, author } = req.body;
+    const { targetProjectPath = process.cwd(), skillName, trigger, instructions, what, why, how, author } = req.body;
     const result = createProjectSkill(targetProjectPath, skillName, trigger, instructions, { what, why, how, author });
     res.json(result);
   } catch (err) {
@@ -281,7 +281,7 @@ app.post('/api/generate-turn-issue', (req, res) => {
 
 app.get('/api/token-issues', (req, res) => {
   try {
-    const { projectPath = '/home/ellol/apps/agent-token-tracker' } = req.query;
+    const { projectPath = process.cwd() } = req.query;
     const issues = listTokenIssues(projectPath);
     res.json(issues);
   } catch (err) {

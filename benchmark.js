@@ -1,14 +1,16 @@
 import { runVerificationBenchmark } from './server/benchmarkEngine.js';
 
+const targetWorkspace = process.argv[2] || process.cwd();
+
 console.log('\n======================================================================');
 console.log('  ⚡ LIVE BENCHMARK: Sequential Tool Calls vs. Packaged Skill');
-console.log('  Testing Workspace: /home/ellol/solutions/clinic-platform');
+console.log(`  Testing Workspace: ${targetWorkspace}`);
 console.log('======================================================================\n');
 
 console.log('⏳ Running Option A (5 separate sequential commands)...');
 console.log('⏳ Running Option B (1 packaged lean script)...\n');
 
-const res = runVerificationBenchmark('/home/ellol/solutions/clinic-platform', 174500);
+const res = runVerificationBenchmark(targetWorkspace, 174500);
 
 console.log('----------------------------------------------------------------------');
 console.log('🔴 OPTION A: 5 Sequential Tool Calls');

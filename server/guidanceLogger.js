@@ -4,7 +4,7 @@ import os from 'os';
 import { getAllSessions } from './parser.js';
 import { loadCustomProjects } from './customProjects.js';
 
-const BACKUP_DIR = '/home/ellol/apps/agent-token-tracker/.backups';
+const BACKUP_DIR = path.resolve('.backups');
 const LOG_FILE = path.join(BACKUP_DIR, 'guidance-history.json');
 
 if (!fs.existsSync(BACKUP_DIR)) {
@@ -31,46 +31,21 @@ export function loadGuidanceRecords() {
   }
 
   // Initial seed records documenting established project guidance
+  const currentPath = process.cwd();
+  const currentName = path.basename(currentPath) || 'tracked-project';
+
   const initialSeeds = [
     {
       id: 'guidance-rec-seed-1',
       timestamp: new Date(Date.now() - 3600000).toISOString(),
-      projectPath: '/home/ellol/apps/agent-token-tracker',
-      projectName: 'agent-token-tracker',
+      projectPath: currentPath,
+      projectName: currentName,
       actionType: 'APPLY_AGENTS_RULE',
       what: 'Created AGENTS.md with role-specific guidance and monthly review protocol',
       why: 'Establish authoritative token guidelines and reference rules for Architect, Coder, and Verifier agents',
       how: 'Added AGENTS.md defining progressive disclosure, low reasoning defaults, and 30-day sync checklist',
-      targetFile: '/home/ellol/apps/agent-token-tracker/AGENTS.md',
+      targetFile: path.join(currentPath, 'AGENTS.md'),
       author: 'Pair Programming Agent',
-      status: 'applied',
-      metadata: {}
-    },
-    {
-      id: 'guidance-rec-seed-2',
-      timestamp: new Date(Date.now() - 7200000).toISOString(),
-      projectPath: '/home/ellol/solutions/clinic-platform',
-      projectName: 'clinic-platform',
-      actionType: 'APPLY_AGENTS_RULE',
-      what: 'Added learning-focused testing comments and vertical slice boundaries to AGENTS.md',
-      why: 'Ensure automated test suites and agent modifications preserve educational story comments and avoid cross-boundary leaks',
-      how: 'Injected testing-comment pass guidelines and vertical slice principles into AGENTS.md',
-      targetFile: '/home/ellol/solutions/clinic-platform/AGENTS.md',
-      author: 'Pair Programming Agent',
-      status: 'applied',
-      metadata: {}
-    },
-    {
-      id: 'guidance-rec-seed-3',
-      timestamp: new Date(Date.now() - 10800000).toISOString(),
-      projectPath: '/home/ellol/solutions/clinic-platform',
-      projectName: 'clinic-platform',
-      actionType: 'APPLY_PACKAGE_SCRIPT',
-      what: 'Configured "test:agent" runner with --bail 1 and --silent flags',
-      why: 'Prevent 40k+ raw console output and passing assertion tokens from polluting subsequent conversation turns',
-      how: 'Added script "test:agent": "vitest run --bail=1 --silent" to apps/admin/package.json',
-      targetFile: '/home/ellol/solutions/clinic-platform/package.json',
-      author: 'Testing & Verification Agent',
       status: 'applied',
       metadata: {}
     }
@@ -102,7 +77,7 @@ export function logGuidanceChange({
   diff = null,
   metadata = {}
 }) {
-  const normalizedPath = projectPath ? path.resolve(projectPath) : '/home/ellol/apps/agent-token-tracker';
+  const normalizedPath = projectPath ? path.resolve(projectPath) : process.cwd();
   const projectName = path.basename(normalizedPath) || 'tracked-project';
 
   const record = {
@@ -161,10 +136,10 @@ export function getGuidanceRecordsForProject(projectPath = null) {
  * Finds the canonical project root (resolving subfolders to the Git repository root)
  */
 export function findProjectRoot(startDir) {
-  if (!startDir) return '/home/ellol/apps/agent-token-tracker';
+  if (!startDir) return process.cwd();
   let curr = path.resolve(startDir);
-  const stopDir = '/home/ellol';
-  while (curr && curr !== stopDir && curr !== '/') {
+  const rootDir = path.parse(curr).root;
+  while (curr && curr !== rootDir) {
     if (fs.existsSync(path.join(curr, '.git'))) {
       return curr;
     }
@@ -179,22 +154,16 @@ export function findProjectRoot(startDir) {
 export async function getTrackedProjects() {
   const projectMap = new Map();
 
-  // Known default projects
-  const defaults = [
-    { path: '/home/ellol/apps/agent-token-tracker', name: 'agent-token-tracker', description: 'Agent Token Tracker (Vue 3, Express)', isDefault: true, sessionCount: 0 },
-    { path: '/home/ellol/solutions/clinic-platform', name: 'clinic-platform', description: 'Clinic Monorepo (NestJS, React, Prisma)', isDefault: true, sessionCount: 0 }
-  ];
-
-  for (const def of defaults) {
-    if (fs.existsSync(def.path)) {
-      projectMap.set(normalizeDir(def.path), {
-        path: def.path,
-        name: def.name,
-        description: def.description,
-        isDefault: true,
-        sessionCount: 0
-      });
-    }
+  // Current workspace as default
+  const currentDir = process.cwd();
+  if (fs.existsSync(currentDir)) {
+    projectMap.set(normalizeDir(currentDir), {
+      path: currentDir,
+      name: path.basename(currentDir) || 'current-project',
+      description: `Current workspace (${path.basename(currentDir)})`,
+      isDefault: true,
+      sessionCount: 0
+    });
   }
 
   // Custom user-added projects

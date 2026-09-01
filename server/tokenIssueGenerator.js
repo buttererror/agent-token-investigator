@@ -6,7 +6,7 @@ import { logGuidanceChange } from './guidanceLogger.js';
  * Normalizes project directory path
  */
 function normalizeDir(p) {
-  if (!p) return '/home/ellol/apps/agent-token-tracker';
+  if (!p) return process.cwd();
   return path.resolve(p).replace(/[\/\\]+$/, '');
 }
 

@@ -15,7 +15,7 @@ export function estimateTokens(text) {
 /**
  * Benchmarks Option A (5 Sequential Commands) vs Option B (1 Packaged Lean Command)
  */
-export function runVerificationBenchmark(targetProjectPath = '/home/ellol/solutions/clinic-platform', contextSize = 170000) {
+export function runVerificationBenchmark(targetProjectPath = process.cwd(), contextSize = 170000) {
   const cwd = targetProjectPath;
 
   // --- OPTION A: 5 Sequential Separate Commands ---

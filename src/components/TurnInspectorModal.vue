@@ -10,7 +10,7 @@ const props = defineProps({
   },
   activeWorkspace: {
     type: String,
-    default: '/home/ellol/solutions/clinic-platform'
+    default: 'all'
   }
 });
 

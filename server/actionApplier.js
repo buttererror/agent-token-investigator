@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { logGuidanceChange } from './guidanceLogger.js';
 
-const BACKUP_DIR = '/home/ellol/apps/agent-token-tracker/.backups';
+const BACKUP_DIR = path.resolve('.backups');
 
 if (!fs.existsSync(BACKUP_DIR)) {
   fs.mkdirSync(BACKUP_DIR, { recursive: true });

@@ -1,5 +1,19 @@
-node_modules
-dist
-.backups
-.DS_Store
+# Dependencies & Build Outputs
+node_modules/
+dist/
+build/
+.output/
+
+# User Data & Backups (Data Sensitivity)
+.backups/
+server/data/
+docs/tokens-consumptions/issues/*.md
+!docs/tokens-consumptions/issues/.gitkeep
+*.jsonl
 *.log
+.DS_Store
+
+# Local Env
+.env
+.env.local
+.env.*.local
