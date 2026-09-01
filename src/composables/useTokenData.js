@@ -22,15 +22,30 @@ export function useTokenData() {
     return 'all';
   };
 
+  const getSavedAgent = () => {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const saved = localStorage.getItem('agent_tracker_agent');
+        if (saved) return saved;
+      }
+    } catch {}
+    return 'all';
+  };
+
   const activeWorkspace = ref(getSavedWorkspace());
+  const activeAgent = ref(getSavedAgent()); // 'all' | 'codex' | 'antigravity'
   const isAutoRefresh = ref(true);
 
   const filteredSessions = computed(() => {
+    let list = sessions.value;
+    if (activeAgent.value && activeAgent.value !== 'all') {
+      list = list.filter(s => s.agentType === activeAgent.value);
+    }
     if (!activeWorkspace.value || activeWorkspace.value === 'all') {
-      return sessions.value;
+      return list;
     }
     const target = activeWorkspace.value.toLowerCase().replace(/[\/\\]+$/, '');
-    return sessions.value.filter(s => {
+    return list.filter(s => {
       const cwd = (s.meta?.cwd || '').toLowerCase().replace(/[\/\\]+$/, '');
       return cwd.startsWith(target) || target.startsWith(cwd);
     });
@@ -194,6 +209,16 @@ export function useTokenData() {
     fetchGuidanceRecords();
   }
 
+  function setAgent(type) {
+    if (!type) return;
+    activeAgent.value = type;
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('agent_tracker_agent', type);
+      }
+    } catch {}
+  }
+
   async function fetchAll() {
     try {
       const [overviewRes, sessionsRes, pacingRes, glossaryRes, projectsRes] = await Promise.all([
@@ -256,8 +281,10 @@ export function useTokenData() {
     error,
     selectedSession,
     activeWorkspace,
+    activeAgent,
     isAutoRefresh,
     setWorkspace,
+    setAgent,
     addProject,
     removeProject,
     browseDirectoryApi,

@@ -114,8 +114,13 @@ function getCacheRate(session) {
           <tr v-for="s in filteredSessions" :key="s.sessionId" class="session-row">
             <td class="td-name">
               <div class="name-box">
-                <span class="thread-title">{{ s.threadName }}</span>
-                <span class="session-uuid mono text-dim">{{ s.sessionId.substring(0, 8) }}... • {{ (s.updatedAt || '').slice(0, 10) }}</span>
+                <div class="title-with-badge">
+                  <span :class="['agent-mini-badge', s.agentType === 'antigravity' ? 'badge-antigravity' : 'badge-codex']">
+                    {{ s.agentType === 'antigravity' ? '🌌 Antigravity' : '🤖 Codex' }}
+                  </span>
+                  <span class="thread-title">{{ s.threadName }}</span>
+                </div>
+                <span class="session-uuid mono text-dim">{{ s.sessionId.substring(0, 8) }}... • {{ (s.updatedAt || '').slice(0, 10) }} • {{ s.meta?.model || 'default' }}</span>
               </div>
             </td>
             <td class="mono font-semibold">{{ s.turnCount }}</td>
@@ -259,7 +264,35 @@ function getCacheRate(session) {
 .name-box {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
+}
+
+.title-with-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.agent-mini-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.badge-antigravity {
+  background: rgba(168, 85, 247, 0.15);
+  color: var(--accent-purple);
+  border: 1px solid rgba(168, 85, 247, 0.3);
+}
+
+.badge-codex {
+  background: rgba(56, 189, 248, 0.15);
+  color: var(--accent-blue);
+  border: 1px solid rgba(56, 189, 248, 0.3);
 }
 
 .thread-title {

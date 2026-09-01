@@ -31,8 +31,10 @@ const {
   error,
   selectedSession,
   activeWorkspace,
+  activeAgent,
   isAutoRefresh,
   setWorkspace,
+  setAgent,
   addProject,
   removeProject,
   fetchGuidanceRecords,
@@ -69,6 +71,10 @@ function handleWorkspaceChange(newPath) {
   setWorkspace(newPath);
 }
 
+function handleAgentChange(newAgent) {
+  setAgent(newAgent);
+}
+
 function handleProjectAdded(newProj) {
   setWorkspace(newProj.path);
   refresh();
@@ -93,6 +99,7 @@ async function handleRollback(backupId) {
     <!-- Header Navigation with Project Selector & Guidance Log -->
     <HeaderNav 
       :active-workspace="activeWorkspace"
+      :active-agent="activeAgent"
       :projects="projects"
       :records-count="guidanceRecords.length"
       :is-auto-refresh="isAutoRefresh"
@@ -103,6 +110,7 @@ async function handleRollback(backupId) {
       @open-guidance-records="isGuidanceRecordsOpen = true"
       @open-project-selector="isProjectSelectorOpen = true"
       @change-workspace="handleWorkspaceChange"
+      @change-agent="handleAgentChange"
     />
 
     <!-- Main Content -->

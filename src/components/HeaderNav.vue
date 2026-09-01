@@ -6,6 +6,10 @@ const props = defineProps({
     type: String,
     required: true
   },
+  activeAgent: {
+    type: String,
+    default: 'all'
+  },
   projects: {
     type: Array,
     default: () => []
@@ -27,7 +31,8 @@ const emit = defineEmits([
   'open-benchmark',
   'open-guidance-records',
   'open-project-selector',
-  'change-workspace'
+  'change-workspace',
+  'change-agent'
 ]);
 
 function onSelectProject(e) {
@@ -48,8 +53,33 @@ function onSelectProject(e) {
         <div class="brand-icon">⚡</div>
         <div class="brand-text">
           <h1>Agent Token Tracker</h1>
-          <span class="brand-sub">Codex Optimization Advisor</span>
+          <span class="brand-sub">Multi-Agent Optimization Advisor</span>
         </div>
+      </div>
+
+      <!-- Agent Switcher Segmented Control -->
+      <div class="agent-switch-group">
+        <button 
+          :class="['agent-tab-btn', { active: activeAgent === 'all' }]"
+          @click="$emit('change-agent', 'all')"
+          title="Show sessions from all AI agents"
+        >
+          <span>⚡</span> All
+        </button>
+        <button 
+          :class="['agent-tab-btn', { active: activeAgent === 'codex' }]"
+          @click="$emit('change-agent', 'codex')"
+          title="Filter to Codex CLI sessions"
+        >
+          <span>🤖</span> Codex
+        </button>
+        <button 
+          :class="['agent-tab-btn', { active: activeAgent === 'antigravity' }]"
+          @click="$emit('change-agent', 'antigravity')"
+          title="Filter to Antigravity sessions"
+        >
+          <span>🌌</span> Antigravity
+        </button>
       </div>
 
       <!-- Project Selector Pill -->
@@ -174,6 +204,41 @@ function onSelectProject(e) {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+}
+
+.agent-switch-group {
+  display: flex;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: 9999px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.agent-tab-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 0.76rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 9999px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+}
+
+.agent-tab-btn:hover {
+  color: var(--text-main);
+}
+
+.agent-tab-btn.active {
+  background: var(--accent-blue);
+  color: #090d16;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(56, 189, 248, 0.3);
 }
 
 .workspace-pill {

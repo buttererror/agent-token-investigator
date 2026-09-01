@@ -446,7 +446,7 @@ function formatToolArg(input) {
         <div class="head-info">
           <h3>🔍 Turn-by-Turn Session Inspector</h3>
           <span class="session-name-lg">{{ session?.threadName || 'Session Details' }}</span>
-          <span class="session-path mono text-dim text-xs">{{ session?.meta?.cwd || '' }} • {{ session?.sessionId }}</span>
+          <span class="session-path mono text-dim text-xs">{{ session?.agentType === 'antigravity' ? '🌌 Antigravity' : '🤖 Codex' }} • {{ session?.meta?.model || 'Model' }} • {{ session?.meta?.cwd || '' }} • {{ session?.sessionId }}</span>
         </div>
         <div class="head-actions">
           <div class="action-btn-group">
