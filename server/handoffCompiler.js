@@ -1,5 +1,5 @@
 /**
- * Compiles a state-preserving session handoff summary from bloated session transcripts
+ * Compiles a state-preserving session handoff summary from session transcripts
  */
 export function compileSessionHandoff(session) {
   if (!session || !session.turns || session.turns.length === 0) {
@@ -7,7 +7,10 @@ export function compileSessionHandoff(session) {
       summaryPrompt: 'Resume work on the current task.',
       taskGoal: 'Unknown',
       modifiedFiles: [],
-      lastDecision: ''
+      lastDecision: '',
+      turnCount: 0,
+      tokensSavedEstimate: 0,
+      isBloated: false
     };
   }
 
@@ -35,7 +38,13 @@ export function compileSessionHandoff(session) {
   let lastDecision = lastTurn.assistantMessage || '';
   if (lastDecision.length > 300) lastDecision = lastDecision.substring(0, 300) + '...';
 
-  // 4. Generate structured 1-paragraph prompt
+  // 4. Calculate realistic per-turn token carryover savings
+  // The savings is what you avoid re-sending from the last turn's context window (~1500 tokens for fresh prompt)
+  const lastTurnInput = lastTurn?.tokenUsage?.input_tokens || 0;
+  const tokensSavedPerTurn = Math.max(lastTurnInput - 1500, 0);
+  const isBloated = session.turns.length >= 12 || lastTurnInput > 120000;
+
+  // 5. Generate structured 1-paragraph prompt
   const filesList = modifiedFiles.length > 0 
     ? modifiedFiles.map(f => `\`${f}\``).join(', ') 
     : 'relevant workspace files';
@@ -55,7 +64,9 @@ export function compileSessionHandoff(session) {
     modifiedFiles,
     lastDecision,
     turnCount: session.turns.length,
-    tokensSavedEstimate: Math.max(Math.round((session.totalUsage.input_tokens || 100000) * 0.85), 50000),
+    lastTurnInputTokens: lastTurnInput,
+    tokensSavedEstimate: tokensSavedPerTurn,
+    isBloated,
     summaryPrompt
   };
 }

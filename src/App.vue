@@ -116,7 +116,8 @@ function toggleRefresh() {
 
     <ActionHandoffModal 
       v-if="isHandoffOpen"
-      :session="selectedSession || sessions[0]"
+      :session="selectedSession || sessions.find(s => s.turnCount > 10) || sessions[0]"
+      :all-sessions="sessions"
       @close="isHandoffOpen = false"
     />
 
