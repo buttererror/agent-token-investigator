@@ -30,12 +30,15 @@ const filteredSessions = computed(() => {
 });
 
 function getSessionHealth(session) {
-  const isBloated = session.turnCount > 15 || (session.totalUsage.input_tokens > 200000);
-  const hasSpikes = session.turns?.some(t => t.noiseSpikes?.length > 0);
+  const cacheRate = getCacheRate(session);
+  const isBloated = session.turnCount > 18 || (session.totalUsage?.input_tokens > 400000 && cacheRate < 70);
+  const hasOutputSpikes = session.turns?.some(t => t.noiseSpikes?.some(s => s.type === 'HEAVY_OUTPUT'));
+  const hasInputSpikes = session.turns?.some(t => t.noiseSpikes?.some(s => s.type === 'UNCACHED_INPUT_SPIKE'));
 
-  if (hasSpikes) return { type: 'red', label: '🔴 Heavy Output Spikes' };
-  if (isBloated) return { type: 'yellow', label: '🟡 Context Bloat' };
-  return { type: 'green', label: '🟢 Lean & Fast' };
+  if (hasOutputSpikes) return { type: 'red', label: '🔴 Heavy Output Spike' };
+  if (hasInputSpikes) return { type: 'yellow', label: '🟡 Uncached Payload Spike' };
+  if (isBloated) return { type: 'yellow', label: '🟡 Long Thread Carryover' };
+  return { type: 'green', label: '🟢 Lean & Cached' };
 }
 
 function getCacheRate(session) {

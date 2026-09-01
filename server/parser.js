@@ -178,21 +178,24 @@ export async function parseSessionFile(filePath) {
 
   // Detect noise spikes across turns
   for (const turn of turns) {
-    if (turn.tokenUsage && turn.tokenUsage.input_tokens > 80000) {
-      turn.noiseSpikes.push({
-        type: 'CONTEXT_BLOAT',
-        severity: 'high',
-        message: `High context carryover: ${turn.tokenUsage.input_tokens.toLocaleString()} input tokens on Turn ${turn.turnNumber}`,
-        tokens: turn.tokenUsage.input_tokens
-      });
-    }
-    if (turn.tokenUsage && turn.tokenUsage.output_tokens > 3000) {
-      turn.noiseSpikes.push({
-        type: 'HEAVY_OUTPUT',
-        severity: 'medium',
-        message: `Large model output: ${turn.tokenUsage.output_tokens.toLocaleString()} tokens`,
-        tokens: turn.tokenUsage.output_tokens
-      });
+    if (turn.tokenUsage) {
+      const freshInput = (turn.tokenUsage.input_tokens || 0) - (turn.tokenUsage.cached_input_tokens || 0);
+      if (freshInput > 35000) {
+        turn.noiseSpikes.push({
+          type: 'UNCACHED_INPUT_SPIKE',
+          severity: 'high',
+          message: `Uncached input payload: ${freshInput.toLocaleString()} fresh tokens (Total: ${turn.tokenUsage.input_tokens.toLocaleString()})`,
+          tokens: freshInput
+        });
+      }
+      if (turn.tokenUsage.output_tokens > 4000) {
+        turn.noiseSpikes.push({
+          type: 'HEAVY_OUTPUT',
+          severity: 'medium',
+          message: `Large model output: ${turn.tokenUsage.output_tokens.toLocaleString()} tokens`,
+          tokens: turn.tokenUsage.output_tokens
+        });
+      }
     }
   }
 

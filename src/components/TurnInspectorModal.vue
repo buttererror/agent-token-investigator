@@ -1,7 +1,8 @@
 <script setup>
+import { computed } from 'vue';
 import Tooltip from './common/Tooltip.vue';
 
-defineProps({
+const props = defineProps({
   session: {
     type: Object,
     required: true
@@ -9,6 +10,50 @@ defineProps({
 });
 
 defineEmits(['close', 'export-handoff']);
+
+const cacheRate = computed(() => {
+  const inp = props.session?.totalUsage?.input_tokens || 0;
+  const cached = props.session?.totalUsage?.cached_input_tokens || 0;
+  if (!inp) return 0;
+  return Math.round((cached / inp) * 100);
+});
+
+const sessionVerdict = computed(() => {
+  const turns = props.session?.turnCount || 0;
+  const rate = cacheRate.value;
+  const hasSpikes = props.session?.turns?.some(t => t.noiseSpikes?.length > 0);
+
+  if (turns <= 5 && rate >= 75) {
+    return {
+      type: 'green',
+      badge: '🟢 Highly Efficient Task',
+      headline: `Executed in ${turns} concise turn(s) with ${rate}% prompt cache hit rate.`,
+      actionAdvice: 'No action needed! This session was executed cleanly with high token efficiency.'
+    };
+  }
+  if (turns > 15) {
+    return {
+      type: 'yellow',
+      badge: '🟡 Context Carryover Warning',
+      headline: `This conversation reached ${turns} turns, re-sending heavy conversation history on every message.`,
+      actionAdvice: 'Recommended: Click "Export Handoff Prompt" to cleanly restart in a fresh window, cutting input token costs by ~85%.'
+    };
+  }
+  if (hasSpikes) {
+    return {
+      type: 'red',
+      badge: '🔴 Uncached Payload Spike',
+      headline: 'One or more turns in this session injected large un-cached data or verbose command output into context.',
+      actionAdvice: 'Review the highlighted turns below to identify which command or file read caused the spike.'
+    };
+  }
+  return {
+    type: 'green',
+    badge: '🟢 Standard Healthy Session',
+    headline: `Ran for ${turns} turns with ${rate}% cache efficiency.`,
+    actionAdvice: 'Operating normally within standard efficiency thresholds.'
+  };
+});
 
 function formatToolArg(input) {
   if (!input) return '';
@@ -54,12 +99,23 @@ function formatToolArg(input) {
           <span class="val mono">{{ (session?.totalUsage?.total_tokens || 0).toLocaleString() }}</span>
         </div>
         <div class="summary-item">
-          <span class="lbl">Cached Input:</span>
-          <span class="val mono text-green">{{ (session?.totalUsage?.cached_input_tokens || 0).toLocaleString() }}</span>
+          <span class="lbl">Cache Hit Rate:</span>
+          <span class="val mono text-green">{{ cacheRate }}%</span>
         </div>
         <div class="summary-item">
-          <span class="lbl">Reasoning:</span>
+          <span class="lbl">Reasoning (Thinking):</span>
           <span class="val mono text-purple">{{ (session?.totalUsage?.reasoning_output_tokens || 0).toLocaleString() }}</span>
+        </div>
+      </div>
+
+      <!-- Session Verdict & What-to-Do Banner -->
+      <div :class="['verdict-card', `verdict-${sessionVerdict.type}`]">
+        <div class="verdict-top">
+          <span class="verdict-badge">{{ sessionVerdict.badge }}</span>
+          <span class="verdict-headline">{{ sessionVerdict.headline }}</span>
+        </div>
+        <div class="verdict-action">
+          <strong>💡 Takeaway:</strong> {{ sessionVerdict.actionAdvice }}
         </div>
       </div>
 
@@ -169,7 +225,7 @@ function formatToolArg(input) {
   background-color: var(--bg-input);
   padding: 12px 18px;
   border-radius: 10px;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
   flex-wrap: wrap;
 }
 
@@ -181,6 +237,52 @@ function formatToolArg(input) {
 
 .summary-item .lbl {
   color: var(--text-dim);
+}
+
+.verdict-card {
+  padding: 14px 18px;
+  border-radius: 10px;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.verdict-green {
+  background-color: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.verdict-yellow {
+  background-color: rgba(234, 179, 8, 0.1);
+  border: 1px solid rgba(234, 179, 8, 0.3);
+}
+
+.verdict-red {
+  background-color: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.verdict-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.verdict-badge {
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.verdict-headline {
+  font-size: 0.85rem;
+  color: var(--text-main);
+}
+
+.verdict-action {
+  font-size: 0.82rem;
+  color: var(--text-muted);
 }
 
 .turns-timeline {
