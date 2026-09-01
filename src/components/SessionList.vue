@@ -114,12 +114,7 @@ function getCacheRate(session) {
           <tr v-for="s in filteredSessions" :key="s.sessionId" class="session-row">
             <td class="td-name">
               <div class="name-box">
-                <div class="title-with-badge">
-                  <span :class="['agent-mini-badge', s.agentType === 'antigravity' ? 'badge-antigravity' : 'badge-codex']">
-                    {{ s.agentType === 'antigravity' ? '🌌 Antigravity' : '🤖 Codex' }}
-                  </span>
-                  <span class="thread-title">{{ s.threadName }}</span>
-                </div>
+                <span class="thread-title">{{ s.threadName }}</span>
                 <span class="session-uuid mono text-dim">{{ s.sessionId.substring(0, 8) }}... • {{ (s.updatedAt || '').slice(0, 10) }} • {{ s.meta?.model || 'default' }}</span>
               </div>
             </td>

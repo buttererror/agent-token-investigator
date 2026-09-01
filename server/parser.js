@@ -2,7 +2,6 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import readline from 'readline';
-import { getAllAntigravitySessions } from './antigravityParser.js';
 
 const CODEX_DIR = path.join(os.homedir(), '.codex');
 const SESSIONS_DIR = path.join(CODEX_DIR, 'sessions');
@@ -221,19 +220,13 @@ export async function parseSessionFile(filePath) {
     filePath,
     fileSize: stat.size,
     sessionId,
-    agentType: 'codex',
-    agentIcon: '🤖',
-    agentLabel: 'Codex',
-    meta: {
-      ...(sessionMeta || {
-        sessionId,
-        id: sessionId,
-        cwd: '',
-        model: 'codex',
-        reasoningEffort: 'default',
-        timestamp: stat.mtime.toISOString()
-      }),
-      agentType: 'codex'
+    meta: sessionMeta || {
+      sessionId,
+      id: sessionId,
+      cwd: '',
+      model: 'codex',
+      reasoningEffort: 'default',
+      timestamp: stat.mtime.toISOString()
     },
     totalUsage: latestTotalUsage || {
       input_tokens: 0,
@@ -256,27 +249,23 @@ export async function parseSessionFile(filePath) {
 }
 
 /**
- * Ingests all sessions concurrently from both Codex and Antigravity with fast mtime caching
+ * Ingests all sessions concurrently with fast mtime caching & in-flight promise deduplication
  */
-export async function getAllSessions(forceRefresh = false, agentType = 'all') {
+export async function getAllSessions(forceRefresh = false) {
   const now = Date.now();
   if (!forceRefresh && lastSessionsCache && (now - lastSessionsCacheTime < SESSIONS_CACHE_TTL_MS)) {
-    if (!agentType || agentType === 'all') return lastSessionsCache;
-    return lastSessionsCache.filter(s => s.agentType === agentType);
+    return lastSessionsCache;
   }
 
   if (inFlightAllSessionsPromise) {
-    const all = await inFlightAllSessionsPromise;
-    if (!agentType || agentType === 'all') return all;
-    return all.filter(s => s.agentType === agentType);
+    return inFlightAllSessionsPromise;
   }
 
   inFlightAllSessionsPromise = (async () => {
     try {
-      const [indexMap, sessionFiles, antigravitySessions] = await Promise.all([
+      const [indexMap, sessionFiles] = await Promise.all([
         getSessionIndex(),
-        Promise.resolve(findSessionFiles()),
-        getAllAntigravitySessions().catch(() => [])
+        Promise.resolve(findSessionFiles())
       ]);
 
       const sessionPromises = sessionFiles.map(async (file) => {
@@ -293,26 +282,21 @@ export async function getAllSessions(forceRefresh = false, agentType = 'all') {
         }
       });
 
-      const resolvedCodex = await Promise.all(sessionPromises);
-      const codexSessions = resolvedCodex.filter(Boolean);
-
-      // Merge both Codex and Antigravity sessions
-      const allSessions = [...codexSessions, ...antigravitySessions];
+      const resolved = await Promise.all(sessionPromises);
+      const sessions = resolved.filter(Boolean);
 
       // Sort by most recent
-      allSessions.sort((a, b) => new Date(b.updatedAt || b.meta?.timestamp || 0) - new Date(a.updatedAt || a.meta?.timestamp || 0));
+      sessions.sort((a, b) => new Date(b.updatedAt || b.meta.timestamp) - new Date(a.updatedAt || a.meta.timestamp));
 
-      lastSessionsCache = allSessions;
+      lastSessionsCache = sessions;
       lastSessionsCacheTime = Date.now();
-      return allSessions;
+      return sessions;
     } finally {
       inFlightAllSessionsPromise = null;
     }
   })();
 
-  const all = await inFlightAllSessionsPromise;
-  if (!agentType || agentType === 'all') return all;
-  return all.filter(s => s.agentType === agentType);
+  return inFlightAllSessionsPromise;
 }
 
 /**

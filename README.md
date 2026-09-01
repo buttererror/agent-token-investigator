@@ -35,25 +35,21 @@ node cli.js
 
 3. **`docs/` Issue Handoff Manager (Autonomous Agent Work Orders)**:
    - Dedicated mechanism to package diagnostic findings and turn spikes into structured Markdown work orders in `docs/tokens-consumptions/issues/`.
-   - **1-Click Copy Agent Prompt**: Produces a ready-to-paste instruction for Codex, Antigravity, or Claude Code (`"Please resolve @docs/tokens-consumptions/issues/issue-*.md"`).
+   - **1-Click Copy Agent Prompt**: Produces a ready-to-paste instruction for Codex (`"Please resolve @docs/tokens-consumptions/issues/issue-*.md"`).
    - Integrated in-app Issue Manager (`📋 Issues (docs/)` in header) to browse, preview, and clean up active work orders.
 
-4. **Multi-Agent Extensibility (Codex & Antigravity)**:
-   - Ingests trajectories from OpenAI Codex (`~/.codex/sessions/`) and Google Antigravity (`~/.gemini/antigravity/brain/`).
-   - **1-Click Agent Switcher (`HeaderNav.vue`)**: Toggle between `⚡ All`, `🤖 Codex`, and `🌌 Antigravity` instantly.
-
-5. **Multi-Project Scope & File System Browser**:
+4. **Multi-Project Scope & File System Browser**:
    - Switch between repositories dynamically or view aggregate metrics across all projects.
    - Built-in **Directory Explorer (`📁+`)** allowing you to browse your local computer and add any codebase with automatic detection of Node.js, Python, Rust, Go, Git, and `AGENTS.md`.
 
-6. **Pre-Flight Prompt Token Linter**:
+5. **Pre-Flight Prompt Token Linter**:
    - Interactive scratchpad to test draft prompts for token expansion risks before sending to an agent.
    - Generates token-lean rewrites with estimated token savings.
 
-7. **State-Preserving Session Handoff Compiler**:
+6. **State-Preserving Session Handoff Compiler**:
    - Extracts task goals, modified files, and last decisions from bloated threads into a clean 1-paragraph prompt to resume in a fresh session saving ~85% input tokens.
 
-8. **Educational Tooltip & Glossary System**:
+7. **Educational Tooltip & Glossary System**:
    - Hoverable `ℹ️` tooltips on every metric, button, and action.
    - Slide-out **Agent Token Guide & Glossary** drawer explaining *Cached Input*, *Reasoning Tokens*, *5-Hour Limits*, *Payload Noise*, and *Progressive Disclosure*.
 
@@ -114,6 +110,6 @@ While Codex session logs are parsed out of the box, the system is designed aroun
 Detailed architectural deep dives and operational reference documents are organized in [`docs/architecture/`](docs/architecture/):
 
 - **[🧠 Mental Model & Token Economics](docs/architecture/mental-model.md)**: Details the quadratic context accumulation trap, prompt cache physics, reasoning effort trade-offs, and progressive disclosure principles.
-- **[🤖 Multi-Agent Architecture & Ingestion](docs/architecture/multi-agent-system.md)**: Explains the normalized session schema, parser adapter pattern, and real-time agent switcher (`All`, `Codex`, `Antigravity`).
+- **[🤖 Multi-Agent Architecture & Ingestion](docs/architecture/multi-agent-system.md)**: Explains the normalized session schema and universal adapter design.
 - **[📁 Project Discovery & Data Privacy](docs/architecture/project-discovery-and-privacy.md)**: Covers the 3-layer discovery pipeline, local directory browsing, dynamic path resolution, and zero-egress data privacy safeguards.
 - **[⚡ Optimization Actions & Diagnostics](docs/architecture/optimization-actions-and-diagnostics.md)**: Documents the 7 high-leverage optimization actions, turn efficiency diagnosis, and batch post-mortem generation (`docs/tokens-consumptions/issues/`).
