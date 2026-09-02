@@ -7,45 +7,28 @@ const props = defineProps({
     type: Object,
     required: true
   },
+  allSessions: {
+    type: Array,
+    default: () => []
+  },
   activeWorkspace: {
     type: String,
     default: 'all'
   }
 });
 
-const emit = defineEmits(['close', 'export-handoff', 'guidance-updated']);
+const emit = defineEmits(['close', 'export-handoff', 'guidance-updated', 'inspect-session']);
 
-function isNoisyTestInvocation(toolCall) {
-  const input = toolCall?.input;
-  const command = typeof input === 'string' ? input : String(input?.cmd || input?.command || '');
-  const isTestCommand = /(?:^|[;&|]\s*)(?:(?:pnpm|npm|yarn|bun)\b[^\n]*\b(?:test(?::[\w-]+)?|jest|vitest|mocha|ava)\b|(?:jest|vitest|mocha|ava|pytest)\b)/i.test(command);
-  return /(?:exec_command|run_command|\bexec\b)/i.test(String(toolCall?.tool || ''))
-    && isTestCommand
-    && !(/--silent/.test(command) && /--bail(?:\s+|=)1\b/.test(command));
+function openConcurrentSession(concurrentRef) {
+  const sid = typeof concurrentRef === 'string' ? concurrentRef : concurrentRef?.sessionId;
+  if (!sid) return;
+  const target = props.allSessions.find(s => s.sessionId === sid || s.meta?.id === sid);
+  if (target) {
+    emit('inspect-session', target);
+  } else {
+    emit('inspect-session', { sessionId: sid, threadName: concurrentRef?.threadName || sid });
+  }
 }
-
-function hasUnboundedFileRead(toolCall) {
-  if (!/(?:view_file|read_file)/i.test(String(toolCall?.tool || ''))) return false;
-  const input = toolCall?.input;
-  if (typeof input === 'string') return !/\b(?:start_?line|end_?line|fromLine|toLine)\b/i.test(input);
-  if (!input || typeof input !== 'object') return true;
-  const keys = Object.keys(input).map((key) => key.toLowerCase());
-  return !keys.some((key) => ['startline', 'endline', 'start_line', 'end_line', 'fromline', 'toline'].includes(key));
-}
-
-function isLikelyRoutineTurn(turn, hasNoisyTests, hasUnboundedRead) {
-  const prompt = `${turn?.userPrompt || ''} ${turn?.assistantMessage || ''}`;
-  return !hasNoisyTests && !hasUnboundedRead && (turn?.toolCalls?.length || 0) <= 2
-    && /\b(?:docs?|documentation|format(?:ting)?|rename|typo|read|review|status|list)\b/i.test(prompt);
-}
-
-const showBestPractices = ref(false);
-const activeNoteTurn = ref(null);
-const turnNoteWhat = ref('');
-const turnNoteWhy = ref('');
-const turnNoteHow = ref('');
-const turnNoteTarget = ref('AGENTS.md');
-const isSubmittingTurnNote = ref(false);
 
 const cacheRate = computed(() => {
   const inp = props.session?.totalUsage?.input_tokens || 0;
@@ -66,6 +49,7 @@ const sessionQuotaDisplay = computed(() => {
     startEndWk: `${q.startSecondaryPercent ?? 0}% → ${q.endSecondaryPercent ?? 0}%`,
     isIsolated: q.isIsolated,
     concurrentCount: q.concurrentSessionCount,
+    concurrentSessions: q.concurrentSessions || [],
     isReset: q.isReset
   };
 });
@@ -81,6 +65,7 @@ function getTurnQuotaDisplay(turn) {
     levelText: `Level: ${q.primaryUsedPercent ?? 0}% 5h · ${q.secondaryUsedPercent ?? 0}% Wk`,
     isIsolated: q.isIsolated,
     concurrentCount: q.concurrentSessionCount,
+    concurrentSessions: q.concurrentSessions || [],
     isReset: q.isReset
   };
 }
@@ -799,7 +784,18 @@ function formatToolArg(input) {
           <span v-if="sessionQuotaDisplay" class="val mono text-yellow">
             {{ sessionQuotaDisplay.primaryText }} · {{ sessionQuotaDisplay.secondaryText }}
             <span v-if="sessionQuotaDisplay.isIsolated" class="iso-tag text-green" title="100% attributed to isolated session">🎯 Isolated</span>
-            <span v-else class="iso-tag text-amber" :title="`${sessionQuotaDisplay.concurrentCount} concurrent session(s) active during this window`">⚠️ {{ sessionQuotaDisplay.concurrentCount }} concurrent</span>
+            <span v-else class="iso-tag text-amber iso-clickable-wrap">
+              <span class="iso-title">⚠️ {{ sessionQuotaDisplay.concurrentCount }} concurrent:</span>
+              <button
+                v-for="cs in sessionQuotaDisplay.concurrentSessions"
+                :key="cs.sessionId"
+                class="co-link-btn"
+                :title="`Inspect concurrent session: ${cs.threadName}`"
+                @click.stop="openConcurrentSession(cs)"
+              >
+                🔗 {{ cs.threadName.length > 20 ? cs.threadName.substring(0, 18) + '...' : cs.threadName }}
+              </button>
+            </span>
           </span>
           <span v-else class="val mono text-muted">Unavailable</span>
         </div>
@@ -1006,7 +1002,18 @@ function formatToolArg(input) {
                     <span class="quota-level text-dim">{{ getTurnQuotaDisplay(turn).levelText }}</span>
                     <span class="sep">•</span>
                     <span v-if="turn.quotaImpact?.isIsolated" class="iso-badge text-green" title="No other sessions active during this turn window">🎯 Isolated</span>
-                    <span v-else class="iso-badge text-amber" :title="`${turn.quotaImpact?.concurrentSessionCount} other session(s) active during this turn window`">⚠️ {{ turn.quotaImpact?.concurrentSessionCount }} concurrent</span>
+                    <span v-else class="iso-badge text-amber iso-clickable-wrap">
+                      <span class="iso-title">⚠️ {{ turn.quotaImpact?.concurrentSessionCount }} concurrent:</span>
+                      <button
+                        v-for="cs in (turn.quotaImpact?.concurrentSessions || [])"
+                        :key="cs.sessionId"
+                        class="co-link-btn"
+                        :title="`Inspect concurrent session: ${cs.threadName}`"
+                        @click.stop="openConcurrentSession(cs)"
+                      >
+                        🔗 {{ cs.threadName.length > 20 ? cs.threadName.substring(0, 18) + '...' : cs.threadName }}
+                      </button>
+                    </span>
                   </span>
                 </Tooltip>
               </div>
@@ -1668,13 +1675,36 @@ function formatToolArg(input) {
   background: rgba(255, 255, 255, 0.05);
 }
 
-.iso-tag {
-  margin-left: 6px;
-  vertical-align: middle;
+.iso-clickable-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
 }
 
-.text-amber {
-  color: #f59e0b;
+.iso-title {
+  font-weight: 600;
+}
+
+.co-link-btn {
+  background: rgba(56, 189, 248, 0.15);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: var(--accent-blue, #38bdf8);
+  font-size: 0.68rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: inherit;
+}
+
+.co-link-btn:hover {
+  background: rgba(56, 189, 248, 0.3);
+  border-color: var(--accent-blue, #38bdf8);
+  text-decoration: underline;
 }
 
 .turn-tokens-pill :deep(.tooltip-container),

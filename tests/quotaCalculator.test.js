@@ -167,21 +167,23 @@ describe('Quota Calculator Unit Tests', () => {
         }
       ];
 
-      const overlapCountA = detectTurnConcurrency(
+      const overlapA = detectTurnConcurrency(
         '2026-09-02T12:00:00.000Z',
         '2026-09-02T12:01:00.000Z',
         'session-A',
         allSessions
       );
-      assert.equal(overlapCountA, 1); // session-B overlaps, session-C is 2 hours later
+      assert.equal(overlapA.count, 1); // session-B overlaps, session-C is 2 hours later
+      assert.equal(overlapA.sessions[0].sessionId, 'session-B');
 
-      const overlapCountC = detectTurnConcurrency(
+      const overlapC = detectTurnConcurrency(
         '2026-09-02T14:00:00.000Z',
         '2026-09-02T14:01:00.000Z',
         'session-C',
         allSessions
       );
-      assert.equal(overlapCountC, 0); // session-C is isolated
+      assert.equal(overlapC.count, 0); // session-C is isolated
+      assert.equal(overlapC.sessions.length, 0);
     });
   });
 

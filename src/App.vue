@@ -77,8 +77,11 @@ async function fetchIssuesCount(targetPath = activeWorkspace.value) {
   } catch {}
 }
 
-function handleInspect(session) {
-  activeInspectSession.value = session;
+function handleInspect(sessionOrRef) {
+  if (!sessionOrRef) return;
+  const sid = typeof sessionOrRef === 'string' ? sessionOrRef : (sessionOrRef.sessionId || sessionOrRef.meta?.id);
+  const found = sessions.value.find(s => s.sessionId === sid || s.meta?.id === sid);
+  activeInspectSession.value = found || sessionOrRef;
 }
 
 function handleExportHandoff(session) {
@@ -217,8 +220,10 @@ onMounted(() => {
     <TurnInspectorModal 
       v-if="activeInspectSession"
       :session="activeInspectSession"
+      :all-sessions="sessions"
       :active-workspace="activeWorkspace"
       @close="activeInspectSession = null"
+      @inspect-session="handleInspect"
       @export-handoff="handleExportHandoff"
       @guidance-updated="() => { fetchGuidanceRecords(activeWorkspace); fetchIssuesCount(activeWorkspace); }"
     />

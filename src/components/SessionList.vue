@@ -64,6 +64,7 @@ function getSessionQuotaText(session) {
     tooltip: `Net change on account quota during this session: 5h limit ${pDelta}, weekly limit ${sDelta}. (${q.isIsolated ? '🎯 Isolated session' : `⚠️ ${q.concurrentSessionCount} concurrent session(s) active`})`,
     isIsolated: q.isIsolated,
     concurrentCount: q.concurrentSessionCount,
+    concurrentSessions: q.concurrentSessions || [],
     hasPositiveImpact: (q.primaryDeltaPercent > 0 || q.secondaryDeltaPercent > 0)
   };
 }
@@ -161,6 +162,17 @@ function getSessionQuotaText(session) {
                 <Tooltip placement="top" title="Session Quota Impact" :text="getSessionQuotaText(s).tooltip">
                   <span>{{ getSessionQuotaText(s).label }}</span>
                 </Tooltip>
+                <div v-if="!getSessionQuotaText(s).isIsolated" class="co-links-row">
+                  <button
+                    v-for="cs in getSessionQuotaText(s).concurrentSessions"
+                    :key="cs.sessionId"
+                    class="co-link-btn-sm"
+                    :title="`Inspect concurrent session: ${cs.threadName}`"
+                    @click.stop="$emit('inspect-session', cs)"
+                  >
+                    🔗 {{ cs.threadName.length > 16 ? cs.threadName.substring(0, 14) + '...' : cs.threadName }}
+                  </button>
+                </div>
               </span>
               <span v-else class="text-dim">--</span>
             </td>
@@ -354,5 +366,32 @@ function getSessionQuotaText(session) {
   border-radius: 5px;
   display: inline-block;
   white-space: nowrap;
+}
+
+.co-links-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 3px;
+}
+
+.co-link-btn-sm {
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  color: var(--accent-blue, #38bdf8);
+  font-size: 0.65rem;
+  padding: 1px 5px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+
+.co-link-btn-sm:hover {
+  background: rgba(56, 189, 248, 0.28);
+  text-decoration: underline;
 }
 </style>

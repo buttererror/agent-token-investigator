@@ -35,11 +35,11 @@ function parseTimeMs(timeVal) {
  */
 export function detectTurnConcurrency(turnStartedAt, turnEndedAt, currentSessionId, allSessions = []) {
   const startMs = parseTimeMs(turnStartedAt);
-  if (!startMs) return 0;
+  if (!startMs) return { count: 0, sessions: [] };
   // Default window of 2 minutes if turnEndedAt is not explicitly provided
   const endMs = parseTimeMs(turnEndedAt) || (startMs + 120000);
 
-  let concurrentCount = 0;
+  const concurrentSessions = [];
 
   for (const session of allSessions) {
     if (session.sessionId === currentSessionId) continue;
@@ -52,11 +52,19 @@ export function detectTurnConcurrency(turnStartedAt, turnEndedAt, currentSession
     });
 
     if (hasOverlap) {
-      concurrentCount++;
+      concurrentSessions.push({
+        sessionId: session.sessionId,
+        threadName: session.threadName || 'Session ' + session.sessionId.substring(0, 8),
+        agentType: session.agentType || 'codex',
+        agentLabel: session.agentLabel || 'Codex'
+      });
     }
   }
 
-  return concurrentCount;
+  return {
+    count: concurrentSessions.length,
+    sessions: concurrentSessions
+  };
 }
 
 /**
@@ -66,9 +74,9 @@ export function detectSessionConcurrency(session, allSessions = []) {
   const startMs = parseTimeMs(session.createdAt || session.turns?.[0]?.startedAt);
   const endMs = parseTimeMs(session.updatedAt || session.turns?.[session.turns.length - 1]?.startedAt);
 
-  if (!startMs || !endMs) return 0;
+  if (!startMs || !endMs) return { count: 0, sessions: [] };
 
-  let concurrentCount = 0;
+  const concurrentSessions = [];
   for (const other of allSessions) {
     if (other.sessionId === session.sessionId) continue;
     const otherStart = parseTimeMs(other.createdAt || other.turns?.[0]?.startedAt);
@@ -76,20 +84,31 @@ export function detectSessionConcurrency(session, allSessions = []) {
     if (!otherStart || !otherEnd) continue;
 
     if (Math.max(startMs, otherStart) < Math.min(endMs, otherEnd)) {
-      concurrentCount++;
+      concurrentSessions.push({
+        sessionId: other.sessionId,
+        threadName: other.threadName || 'Session ' + other.sessionId.substring(0, 8),
+        agentType: other.agentType || 'codex',
+        agentLabel: other.agentLabel || 'Codex'
+      });
     }
   }
 
-  return concurrentCount;
+  return {
+    count: concurrentSessions.length,
+    sessions: concurrentSessions
+  };
 }
 
 /**
  * Calculates quota impact for an individual turn relative to previous snapshot
  */
-export function calculateTurnQuotaImpact(currentTurn, previousTurn = null, concurrentSessionCount = 0) {
+export function calculateTurnQuotaImpact(currentTurn, previousTurn = null, concurrencyInput = { count: 0, sessions: [] }) {
   const rateLimits = currentTurn?.rateLimits;
   const primary = rateLimits?.primary;
   const secondary = rateLimits?.secondary;
+
+  const count = typeof concurrencyInput === 'number' ? concurrencyInput : (concurrencyInput?.count || 0);
+  const concurrentSessions = typeof concurrencyInput === 'number' ? [] : (concurrencyInput?.sessions || []);
 
   const quotaAvailable = Boolean(
     (primary && Number.isFinite(primary.used_percent)) ||
@@ -105,8 +124,9 @@ export function calculateTurnQuotaImpact(currentTurn, previousTurn = null, concu
       secondaryDeltaPercent: null,
       primaryResetsAt: null,
       secondaryResetsAt: null,
-      concurrentSessionCount,
-      isIsolated: concurrentSessionCount === 0,
+      concurrentSessionCount: count,
+      concurrentSessions,
+      isIsolated: count === 0,
       isReset: false
     };
   }
@@ -143,8 +163,9 @@ export function calculateTurnQuotaImpact(currentTurn, previousTurn = null, concu
     secondaryDeltaPercent: secondaryDelta,
     primaryResetsAt: toIsoSafe(primary?.resets_at),
     secondaryResetsAt: toIsoSafe(secondary?.resets_at),
-    concurrentSessionCount,
-    isIsolated: concurrentSessionCount === 0,
+    concurrentSessionCount: count,
+    concurrentSessions,
+    isIsolated: count === 0,
     isReset
   };
 }
@@ -175,6 +196,7 @@ export function calculateSessionQuotaImpact(session, allSessions = []) {
       endSecondaryPercent: null,
       secondaryDeltaPercent: null,
       concurrentSessionCount: 0,
+      concurrentSessions: [],
       isIsolated: true,
       isReset: false
     };
@@ -202,7 +224,7 @@ export function calculateSessionQuotaImpact(session, allSessions = []) {
     if (secondaryDelta < 0) isReset = true;
   }
 
-  const concurrentCount = detectSessionConcurrency(session, allSessions);
+  const concurrency = detectSessionConcurrency(session, allSessions);
 
   return {
     available: true,
@@ -212,8 +234,9 @@ export function calculateSessionQuotaImpact(session, allSessions = []) {
     startSecondaryPercent: startSecondary,
     endSecondaryPercent: endSecondary,
     secondaryDeltaPercent: secondaryDelta,
-    concurrentSessionCount: concurrentCount,
-    isIsolated: concurrentCount === 0,
+    concurrentSessionCount: concurrency.count,
+    concurrentSessions: concurrency.sessions,
+    isIsolated: concurrency.count === 0,
     isReset
   };
 }
