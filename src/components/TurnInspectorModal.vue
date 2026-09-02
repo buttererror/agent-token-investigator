@@ -30,6 +30,38 @@ function openConcurrentSession(concurrentRef) {
   }
 }
 
+function isNoisyTestInvocation(toolCall) {
+  const input = toolCall?.input;
+  const command = typeof input === 'string' ? input : String(input?.cmd || input?.command || '');
+  const isTestCommand = /(?:^|[;&|]\s*)(?:(?:pnpm|npm|yarn|bun)\b[^\n]*\b(?:test(?::[\w-]+)?|jest|vitest|mocha|ava)\b|(?:jest|vitest|mocha|ava|pytest)\b)/i.test(command);
+  return /(?:exec_command|run_command|\bexec\b)/i.test(String(toolCall?.tool || ''))
+    && isTestCommand
+    && !(/--silent/.test(command) && /--bail(?:\s+|=)1\b/.test(command));
+}
+
+function hasUnboundedFileRead(toolCall) {
+  if (!/(?:view_file|read_file)/i.test(String(toolCall?.tool || ''))) return false;
+  const input = toolCall?.input;
+  if (typeof input === 'string') return !/\b(?:start_?line|end_?line|fromLine|toLine)\b/i.test(input);
+  if (!input || typeof input !== 'object') return true;
+  const keys = Object.keys(input).map((key) => key.toLowerCase());
+  return !keys.some((key) => ['startline', 'endline', 'start_line', 'end_line', 'fromline', 'toline'].includes(key));
+}
+
+function isLikelyRoutineTurn(turn, hasNoisyTests, hasUnboundedRead) {
+  const prompt = `${turn?.userPrompt || ''} ${turn?.assistantMessage || ''}`;
+  return !hasNoisyTests && !hasUnboundedRead && (turn?.toolCalls?.length || 0) <= 2
+    && /\b(?:docs?|documentation|format(?:ting)?|rename|typo|read|review|status|list)\b/i.test(prompt);
+}
+
+const showBestPractices = ref(false);
+const activeNoteTurn = ref(null);
+const turnNoteWhat = ref('');
+const turnNoteWhy = ref('');
+const turnNoteHow = ref('');
+const turnNoteTarget = ref('AGENTS.md');
+const isSubmittingTurnNote = ref(false);
+
 const cacheRate = computed(() => {
   const inp = props.session?.totalUsage?.input_tokens || 0;
   const cached = props.session?.totalUsage?.cached_input_tokens || 0;
