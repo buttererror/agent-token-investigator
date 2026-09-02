@@ -53,6 +53,20 @@ function getFreshInput(session) {
   const cached = session.totalUsage?.cached_input_tokens || 0;
   return Math.max(input - cached, 0);
 }
+
+function getSessionQuotaText(session) {
+  const q = session.quotaImpact;
+  if (!q || !q.available) return null;
+  const pDelta = q.primaryDeltaPercent !== null ? (q.primaryDeltaPercent > 0 ? `+${q.primaryDeltaPercent}%` : `${q.primaryDeltaPercent}%`) : '--';
+  const sDelta = q.secondaryDeltaPercent !== null ? (q.secondaryDeltaPercent > 0 ? `+${q.secondaryDeltaPercent}%` : `${q.secondaryDeltaPercent}%`) : '--';
+  return {
+    label: `${pDelta} 5h · ${sDelta} Wk`,
+    tooltip: `Net change on account quota during this session: 5h limit ${pDelta}, weekly limit ${sDelta}. (${q.isIsolated ? '🎯 Isolated session' : `⚠️ ${q.concurrentSessionCount} concurrent session(s) active`})`,
+    isIsolated: q.isIsolated,
+    concurrentCount: q.concurrentSessionCount,
+    hasPositiveImpact: (q.primaryDeltaPercent > 0 || q.secondaryDeltaPercent > 0)
+  };
+}
 </script>
 
 <template>
@@ -113,6 +127,12 @@ function getFreshInput(session) {
               </div>
             </th>
             <th>Reasoning</th>
+            <th>
+              <div class="th-wrap">
+                <span>Account Quota Δ</span>
+                <Tooltip placement="bottom" title="Account Quota Delta" text="Net change across 5-hour and weekly rolling limits during this session's lifespan. Also flags concurrent session overlap." />
+              </div>
+            </th>
             <th>Health Status</th>
             <th>Action</th>
           </tr>
@@ -136,6 +156,14 @@ function getFreshInput(session) {
             <td class="mono text-purple">
               {{ (s.totalUsage.reasoning_output_tokens || 0).toLocaleString() }}
             </td>
+            <td class="mono">
+              <span v-if="getSessionQuotaText(s)" :class="['quota-badge-pill', getSessionQuotaText(s).hasPositiveImpact ? 'text-yellow' : 'text-muted']">
+                <Tooltip placement="top" title="Session Quota Impact" :text="getSessionQuotaText(s).tooltip">
+                  <span>{{ getSessionQuotaText(s).label }}</span>
+                </Tooltip>
+              </span>
+              <span v-else class="text-dim">--</span>
+            </td>
             <td>
               <span :class="['badge', `badge-${getSessionHealth(s).type}`]">
                 {{ getSessionHealth(s).label }}
@@ -152,7 +180,7 @@ function getFreshInput(session) {
           </tr>
 
           <tr v-if="filteredSessions.length === 0">
-            <td colspan="8" class="empty-cell">
+            <td colspan="9" class="empty-cell">
               {{ sessions.length ? 'No matching sessions found for this filter.' : 'No sessions are available in this scope yet.' }}
             </td>
           </tr>
@@ -315,5 +343,16 @@ function getFreshInput(session) {
 
 .text-green { color: var(--accent-green); }
 .text-purple { color: var(--accent-purple); }
+.text-yellow { color: var(--accent-yellow, #eab308); }
 .font-semibold { font-weight: 600; }
+
+.quota-badge-pill {
+  font-size: 0.75rem;
+  background: rgba(234, 179, 8, 0.08);
+  border: 1px solid rgba(234, 179, 8, 0.2);
+  padding: 2px 6px;
+  border-radius: 5px;
+  display: inline-block;
+  white-space: nowrap;
+}
 </style>

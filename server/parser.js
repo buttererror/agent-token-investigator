@@ -3,6 +3,11 @@ import path from 'path';
 import os from 'os';
 import readline from 'readline';
 import { getAllAntigravitySessions } from './antigravityParser.js';
+import {
+  calculateTurnQuotaImpact,
+  calculateSessionQuotaImpact,
+  enrichSessionsWithQuota
+} from './quotaCalculator.js';
 
 const CODEX_DIR = path.join(os.homedir(), '.codex');
 const SESSIONS_DIR = path.join(CODEX_DIR, 'sessions');
@@ -232,12 +237,22 @@ export async function parseSessionFile(filePath) {
     }
   }
 
+  // Attach turn-level quota calculations
+  const turnsWithQuota = turns.map((turn, index, arr) => {
+    const prevTurn = index > 0 ? arr[index - 1] : null;
+    const quotaImpact = calculateTurnQuotaImpact(turn, prevTurn, 0);
+    return {
+      ...turn,
+      quotaImpact
+    };
+  });
+
   const sessionId = sessionMeta?.sessionId || path.basename(filePath).replace('.jsonl', '');
   // The timeline displays last_token_usage for each turn. Aggregate those same
   // measurements for the session card so its totals always reconcile with the
   // visible turns. latestTotalUsage is retained only for sessions with no
   // turn-level telemetry.
-  const turnUsageTotal = sumTurnUsage(turns);
+  const turnUsageTotal = sumTurnUsage(turnsWithQuota);
   const parsedSession = {
     filePath,
     fileSize: stat.size,
@@ -264,8 +279,9 @@ export async function parseSessionFile(filePath) {
       total_tokens: 0
     },
     rateLimits: latestRateLimits,
-    turnCount: turns.length,
-    turns
+    quotaImpact: calculateSessionQuotaImpact({ turns: turnsWithQuota, rateLimits: latestRateLimits }),
+    turnCount: turnsWithQuota.length,
+    turns: turnsWithQuota
   };
 
   fileCache.set(filePath, {
@@ -317,9 +333,11 @@ export async function getAllSessions(forceRefresh = false) {
       const allSessions = [...codexSessions, ...antigravitySessions];
       allSessions.sort((a, b) => new Date(b.updatedAt || b.meta?.timestamp || 0) - new Date(a.updatedAt || a.meta?.timestamp || 0));
 
-      lastSessionsCache = allSessions;
+      const enrichedAllSessions = enrichSessionsWithQuota(allSessions);
+
+      lastSessionsCache = enrichedAllSessions;
       lastSessionsCacheTime = Date.now();
-      return allSessions;
+      return enrichedAllSessions;
     } finally {
       inFlightAllSessionsPromise = null;
     }
@@ -327,6 +345,8 @@ export async function getAllSessions(forceRefresh = false) {
 
   return inFlightAllSessionsPromise;
 }
+
+export { calculateTurnQuotaImpact, calculateSessionQuotaImpact, enrichSessionsWithQuota };
 
 /** Return the newest provider-reported quota snapshot across all sessions. */
 export function getLatestRateLimitSnapshot(sessions) {

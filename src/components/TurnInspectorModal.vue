@@ -54,6 +54,37 @@ const cacheRate = computed(() => {
   return Math.round((cached / inp) * 100);
 });
 
+const sessionQuotaDisplay = computed(() => {
+  const q = props.session?.quotaImpact;
+  if (!q || !q.available) return null;
+  const pDelta = q.primaryDeltaPercent !== null ? (q.primaryDeltaPercent > 0 ? `+${q.primaryDeltaPercent}%` : `${q.primaryDeltaPercent}%`) : '--';
+  const sDelta = q.secondaryDeltaPercent !== null ? (q.secondaryDeltaPercent > 0 ? `+${q.secondaryDeltaPercent}%` : `${q.secondaryDeltaPercent}%`) : '--';
+  return {
+    primaryText: `${pDelta} 5h`,
+    secondaryText: `${sDelta} Weekly`,
+    startEnd5h: `${q.startPrimaryPercent ?? 0}% → ${q.endPrimaryPercent ?? 0}%`,
+    startEndWk: `${q.startSecondaryPercent ?? 0}% → ${q.endSecondaryPercent ?? 0}%`,
+    isIsolated: q.isIsolated,
+    concurrentCount: q.concurrentSessionCount,
+    isReset: q.isReset
+  };
+});
+
+function getTurnQuotaDisplay(turn) {
+  const q = turn?.quotaImpact;
+  if (!q || !q.available) return null;
+  const pDelta = q.primaryDeltaPercent !== null ? (q.primaryDeltaPercent > 0 ? `+${q.primaryDeltaPercent}%` : `${q.primaryDeltaPercent}%`) : '--';
+  const sDelta = q.secondaryDeltaPercent !== null ? (q.secondaryDeltaPercent > 0 ? `+${q.secondaryDeltaPercent}%` : `${q.secondaryDeltaPercent}%`) : '--';
+  return {
+    primaryText: `${pDelta} (5h)`,
+    secondaryText: `${sDelta} (Wk)`,
+    levelText: `Level: ${q.primaryUsedPercent ?? 0}% 5h · ${q.secondaryUsedPercent ?? 0}% Wk`,
+    isIsolated: q.isIsolated,
+    concurrentCount: q.concurrentSessionCount,
+    isReset: q.isReset
+  };
+}
+
 const reportableTurnCount = computed(() => {
   return (props.session?.turns || []).filter(shouldOfferIssueReport).length;
 });
@@ -755,6 +786,23 @@ function formatToolArg(input) {
           </span>
           <span class="val mono text-purple">{{ (session?.totalUsage?.reasoning_output_tokens || 0).toLocaleString() }}</span>
         </div>
+        <div class="summary-item">
+          <span class="lbl">
+            Account Quota Δ
+            <Tooltip
+              placement="bottom"
+              title="Account Quota Change"
+              text="Net change across 5-hour and weekly rolling limits during this session's lifespan. If other sessions executed concurrently, this reflects account-wide shift."
+              whyItMatters="Shows how much this session (and concurrent threads) shifted your 5-hour and weekly rate limits."
+            />:
+          </span>
+          <span v-if="sessionQuotaDisplay" class="val mono text-yellow">
+            {{ sessionQuotaDisplay.primaryText }} · {{ sessionQuotaDisplay.secondaryText }}
+            <span v-if="sessionQuotaDisplay.isIsolated" class="iso-tag text-green" title="100% attributed to isolated session">🎯 Isolated</span>
+            <span v-else class="iso-tag text-amber" :title="`${sessionQuotaDisplay.concurrentCount} concurrent session(s) active during this window`">⚠️ {{ sessionQuotaDisplay.concurrentCount }} concurrent</span>
+          </span>
+          <span v-else class="val mono text-muted">Unavailable</span>
+        </div>
       </div>
 
       <!-- Session Verdict & What-to-Do Banner -->
@@ -933,6 +981,33 @@ function formatToolArg(input) {
                   whyItMatters="Output tokens are billed at higher rates; keep outputs lean with targeted file replacements."
                 >
                   <span class="token-item-lbl" title="Output Tokens">Out: {{ (turn.tokenUsage.output_tokens || 0).toLocaleString() }}</span>
+                </Tooltip>
+              </div>
+
+              <!-- Turn Quota Impact Pill -->
+              <div v-if="getTurnQuotaDisplay(turn)" class="turn-quota-pill mono">
+                <Tooltip
+                  placement="top"
+                  title="Account-Level Quota Delta"
+                  :text="`5-hour limit delta: ${getTurnQuotaDisplay(turn).primaryText}, weekly limit delta: ${getTurnQuotaDisplay(turn).secondaryText}. Current: ${getTurnQuotaDisplay(turn).levelText}.`"
+                  why-it-matters="Shows the account-wide quota consumed during this turn. If other sessions executed in parallel, that concurrent activity is indicated."
+                >
+                  <span class="quota-wrap">
+                    <span class="quota-icon">⚡</span>
+                    <span class="quota-lbl">Account Δ:</span>
+                    <span :class="['quota-delta', (turn.quotaImpact?.primaryDeltaPercent > 0 ? 'text-yellow' : (turn.quotaImpact?.primaryDeltaPercent < 0 ? 'text-green' : 'text-muted'))]">
+                      {{ getTurnQuotaDisplay(turn).primaryText }}
+                    </span>
+                    <span class="sep">•</span>
+                    <span :class="['quota-delta', (turn.quotaImpact?.secondaryDeltaPercent > 0 ? 'text-yellow' : (turn.quotaImpact?.secondaryDeltaPercent < 0 ? 'text-green' : 'text-muted'))]">
+                      {{ getTurnQuotaDisplay(turn).secondaryText }}
+                    </span>
+                    <span class="sep">•</span>
+                    <span class="quota-level text-dim">{{ getTurnQuotaDisplay(turn).levelText }}</span>
+                    <span class="sep">•</span>
+                    <span v-if="turn.quotaImpact?.isIsolated" class="iso-badge text-green" title="No other sessions active during this turn window">🎯 Isolated</span>
+                    <span v-else class="iso-badge text-amber" :title="`${turn.quotaImpact?.concurrentSessionCount} other session(s) active during this turn window`">⚠️ {{ turn.quotaImpact?.concurrentSessionCount }} concurrent</span>
+                  </span>
                 </Tooltip>
               </div>
             </div>
@@ -1552,7 +1627,58 @@ function formatToolArg(input) {
   gap: 6px;
 }
 
-.turn-tokens-pill :deep(.tooltip-container) {
+.turn-quota-pill {
+  font-size: 0.72rem;
+  background: rgba(234, 179, 8, 0.08);
+  border: 1px solid rgba(234, 179, 8, 0.25);
+  padding: 3px 8px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.quota-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.quota-icon {
+  font-size: 0.75rem;
+}
+
+.quota-lbl {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.quota-delta {
+  font-weight: 700;
+}
+
+.quota-level {
+  font-size: 0.7rem;
+}
+
+.iso-badge, .iso-tag {
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.iso-tag {
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.text-amber {
+  color: #f59e0b;
+}
+
+.turn-tokens-pill :deep(.tooltip-container),
+.turn-quota-pill :deep(.tooltip-container) {
   margin-left: 0;
 }
 
