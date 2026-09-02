@@ -30,3 +30,21 @@ When provider usage rises, the meter can generate a read-only Provider Usage
 Incident in `docs/tokens-consumptions/issues/`. The incident records the
 provider change, likely contributors, and concrete workflow recommendations;
 it never controls or pauses Codex tasks.
+
+---
+
+## Turn & Session Quota Attribution Engine
+
+All quota calculation and concurrency detection logic is isolated in [`server/quotaCalculator.js`](../../server/quotaCalculator.js):
+
+1. **5-Hour & Weekly Rolling Window Deltas**:
+   - **Turn Level**: Computes $\Delta 5\text{h}$ (`primaryDeltaPercent`) and $\Delta \text{Weekly}$ (`secondaryDeltaPercent`) between consecutive turns.
+   - **Session Level**: Computes net start-to-end quota shift across the entire session lifecycle.
+   - **Reset / Roll-Off**: Automatically identifies rolling window resets and usage roll-offs (`isReset: true`).
+
+2. **Multi-Session Concurrency & Interactive Cross-Thread Linking**:
+   - Compares turn and session execution timestamp intervals across all active threads.
+   - Identifies whether a turn was `🎯 Isolated` (100% directly attributed) or executed alongside `⚠️ Concurrent Sessions`.
+   - Surfaces interactive `🔗 Concurrent Session` navigation buttons in `TurnInspectorModal.vue` and `SessionList.vue` to allow immediate cross-thread inspection.
+   - Fully verified with unit tests in `tests/quotaCalculator.test.js`.
+
