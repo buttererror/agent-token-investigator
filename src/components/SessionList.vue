@@ -60,12 +60,13 @@ function getSessionQuotaText(session) {
   const pDelta = q.primaryDeltaPercent !== null ? (q.primaryDeltaPercent > 0 ? `+${q.primaryDeltaPercent}%` : `${q.primaryDeltaPercent}%`) : '--';
   const sDelta = q.secondaryDeltaPercent !== null ? (q.secondaryDeltaPercent > 0 ? `+${q.secondaryDeltaPercent}%` : `${q.secondaryDeltaPercent}%`) : '--';
   return {
-    label: `${pDelta} 5h · ${sDelta} Wk`,
-    tooltip: `Net change on account quota during this session: 5h limit ${pDelta}, weekly limit ${sDelta}. (${q.isIsolated ? '🎯 Isolated session' : `⚠️ ${q.concurrentSessionCount} concurrent session(s) active`})`,
+    label: `${pDelta} 5h · ${sDelta} Wk${q.isReset ? ' (↺)' : ''}`,
+    tooltip: `Net change on account quota during this session: 5h limit ${pDelta}, weekly limit ${sDelta}.${q.isReset ? ' ↺ Provider window reset or roll-off occurred.' : ''} (${q.isIsolated ? '🎯 Isolated session' : `⚠️ ${q.concurrentSessionCount} concurrent session(s) active`})`,
     isIsolated: q.isIsolated,
     concurrentCount: q.concurrentSessionCount,
     concurrentSessions: q.concurrentSessions || [],
-    hasPositiveImpact: (q.primaryDeltaPercent > 0 || q.secondaryDeltaPercent > 0)
+    hasPositiveImpact: (q.primaryDeltaPercent > 0 || q.secondaryDeltaPercent > 0),
+    isReset: Boolean(q.isReset)
   };
 }
 </script>
@@ -158,7 +159,7 @@ function getSessionQuotaText(session) {
               {{ (s.totalUsage.reasoning_output_tokens || 0).toLocaleString() }}
             </td>
             <td class="mono">
-              <span v-if="getSessionQuotaText(s)" :class="['quota-badge-pill', getSessionQuotaText(s).hasPositiveImpact ? 'text-yellow' : 'text-muted']">
+              <span v-if="getSessionQuotaText(s)" :class="['quota-badge-pill', getSessionQuotaText(s).hasPositiveImpact ? 'text-yellow' : (getSessionQuotaText(s).isReset ? 'text-cyan' : 'text-muted')]">
                 <Tooltip placement="top" title="Session Quota Impact" :text="getSessionQuotaText(s).tooltip">
                   <span>{{ getSessionQuotaText(s).label }}</span>
                 </Tooltip>
@@ -355,6 +356,7 @@ function getSessionQuotaText(session) {
 
 .text-green { color: var(--accent-green); }
 .text-purple { color: var(--accent-purple); }
+.text-cyan { color: var(--dashboard-cyan, #2dcaf5); }
 .text-yellow { color: var(--accent-yellow, #eab308); }
 .font-semibold { font-weight: 600; }
 

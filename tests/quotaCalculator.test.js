@@ -64,6 +64,34 @@ describe('Quota Calculator Unit Tests', () => {
       assert.equal(impact.available, true);
       assert.equal(impact.primaryDeltaPercent, -80);
       assert.equal(impact.isReset, true);
+      assert.equal(impact.isPrimaryReset, true);
+    });
+
+    test('correctly calculates delta when provider window resets with new resets_at', () => {
+      const prevTurn = {
+        turnNumber: 14,
+        rateLimits: {
+          primary: { used_percent: 44, window_minutes: 300, resets_at: 1788364977 },
+          secondary: { used_percent: 48, window_minutes: 10080, resets_at: 1788773928 }
+        }
+      };
+
+      const currTurn = {
+        turnNumber: 15,
+        rateLimits: {
+          primary: { used_percent: 1, window_minutes: 300, resets_at: 1788451830 },
+          secondary: { used_percent: 48, window_minutes: 10080, resets_at: 1788773928 }
+        }
+      };
+
+      const impact = calculateTurnQuotaImpact(currTurn, prevTurn, 0);
+
+      assert.equal(impact.available, true);
+      assert.equal(impact.primaryDeltaPercent, 1);
+      assert.equal(impact.secondaryDeltaPercent, 0);
+      assert.equal(impact.isReset, true);
+      assert.equal(impact.isPrimaryReset, true);
+      assert.equal(impact.isSecondaryReset, false);
     });
 
     test('handles first turn with no previous snapshot', () => {

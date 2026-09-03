@@ -144,6 +144,7 @@ export async function parseSessionFile(filePath) {
     }
 
     if (type === 'turn_context') {
+      const turnModel = payload?.model || payload?.collaboration_mode?.settings?.model || sessionMeta?.model || 'codex';
       currentTurn = {
         turnNumber: turns.length + 1,
         turnId: payload?.turn_id || turns.length + 1,
@@ -153,7 +154,10 @@ export async function parseSessionFile(filePath) {
         toolCalls: [],
         tokenUsage: null,
         rateLimits: null,
-        noiseSpikes: []
+        noiseSpikes: [],
+        model: turnModel,
+        agentType: 'codex',
+        agentLabel: 'Codex'
       };
       turns.push(currentTurn);
     }
@@ -165,7 +169,14 @@ export async function parseSessionFile(filePath) {
           latestTotalUsage = info.total_token_usage;
         }
         if (info.last_token_usage && currentTurn) {
-          currentTurn.tokenUsage = info.last_token_usage;
+          if (!currentTurn.tokenUsage) {
+            currentTurn.tokenUsage = { ...info.last_token_usage };
+          } else {
+            const tokenFields = ['input_tokens', 'cached_input_tokens', 'cache_write_input_tokens', 'output_tokens', 'reasoning_output_tokens', 'total_tokens'];
+            for (const field of tokenFields) {
+              currentTurn.tokenUsage[field] = (currentTurn.tokenUsage[field] || 0) + (info.last_token_usage[field] || 0);
+            }
+          }
         }
         if (payload.rate_limits) {
           latestRateLimits = payload.rate_limits;
@@ -235,6 +246,15 @@ export async function parseSessionFile(filePath) {
         });
       }
     }
+  }
+
+  const sessionModel = sessionMeta?.model || 'codex';
+  for (const turn of turns) {
+    if (!turn.model || turn.model === 'codex') {
+      turn.model = sessionModel;
+    }
+    turn.agentType = 'codex';
+    turn.agentLabel = 'Codex';
   }
 
   // Attach turn-level quota calculations

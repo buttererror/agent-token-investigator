@@ -19,6 +19,7 @@ This document establishes the project contract, role-specific agent guidance, re
     - [📁 Project Discovery & Data Privacy](docs/architecture/project-discovery-and-privacy.md)
     - [⚡ Optimization Actions & Diagnostics](docs/architecture/optimization-actions-and-diagnostics.md)
     - [⚡ Provider-Grounded Pacing & Quota Engine](docs/architecture/provider-grounded-pacing.md)
+    - [🧭 Provider Usage Investigation Direction](docs/architecture/provider-usage-investigation-direction-plan.md)
     - [🔍 Roadmap: Agent Guidance Verification Layer](docs/architecture/agent-guidance-verification-plan.md)
 
 ---

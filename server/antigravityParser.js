@@ -102,7 +102,7 @@ export async function parseAntigravitySessionFile(sessionId, logPath) {
           userPrompt = stepContent.replace(/<[\s\S]*?>/g, '').trim().substring(0, 160) || 'User Request';
         }
 
-        const modelMatch = stepContent.match(/Model Selection\` from None to ([\w\s\.\(\)\-]+)\./);
+        const modelMatch = stepContent.match(/Model Selection\` from (?:None|[\w\s\.\(\)\-]+) to ([\w\s\.\(\)\-]+)\./);
         if (modelMatch) modelName = modelMatch[1].trim();
 
         const cwdMatch = stepContent.match(/->\s*([\/a-zA-Z0-9_\-\.]+)/);
@@ -121,7 +121,8 @@ export async function parseAntigravitySessionFile(sessionId, logPath) {
           assistantMessage: '',
           outputChars: 0,
           toolOutputChars: 0,
-          noiseSpikes: []
+          noiseSpikes: [],
+          model: modelName
         };
       } else if (currentRawTurn) {
         if (step.tool_calls && Array.isArray(step.tool_calls)) {
@@ -207,6 +208,9 @@ export async function parseAntigravitySessionFile(sessionId, logPath) {
         toolCalls: rt.toolCalls,
         noiseSpikes: rt.noiseSpikes,
         durationMs: 2500,
+        model: rt.model || modelName,
+        agentType: 'antigravity',
+        agentLabel: 'Antigravity',
         tokenUsage: {
           input_tokens: totalInputTokens,
           cached_input_tokens: cachedTokens,

@@ -143,17 +143,42 @@ export function calculateTurnQuotaImpact(currentTurn, previousTurn = null, concu
 
   let primaryDelta = null;
   let secondaryDelta = null;
-  let isReset = false;
+  let isPrimaryReset = false;
+  let isSecondaryReset = false;
+
+  const primaryResetOccurred = Boolean(
+    primary?.resets_at &&
+    previousTurn?.rateLimits?.primary?.resets_at &&
+    primary.resets_at !== previousTurn.rateLimits.primary.resets_at
+  );
+
+  const secondaryResetOccurred = Boolean(
+    secondary?.resets_at &&
+    previousTurn?.rateLimits?.secondary?.resets_at &&
+    secondary.resets_at !== previousTurn.rateLimits.secondary.resets_at
+  );
 
   if (primaryUsed !== null && prevPrimaryUsed !== null) {
-    primaryDelta = Math.round((primaryUsed - prevPrimaryUsed) * 100) / 100;
-    if (primaryDelta < 0) isReset = true;
+    if (primaryResetOccurred) {
+      primaryDelta = primaryUsed;
+      isPrimaryReset = true;
+    } else {
+      primaryDelta = Math.round((primaryUsed - prevPrimaryUsed) * 100) / 100;
+      if (primaryDelta < 0) isPrimaryReset = true;
+    }
   }
 
   if (secondaryUsed !== null && prevSecondaryUsed !== null) {
-    secondaryDelta = Math.round((secondaryUsed - prevSecondaryUsed) * 100) / 100;
-    if (secondaryDelta < 0) isReset = true;
+    if (secondaryResetOccurred) {
+      secondaryDelta = secondaryUsed;
+      isSecondaryReset = true;
+    } else {
+      secondaryDelta = Math.round((secondaryUsed - prevSecondaryUsed) * 100) / 100;
+      if (secondaryDelta < 0) isSecondaryReset = true;
+    }
   }
+
+  const isReset = isPrimaryReset || isSecondaryReset;
 
   return {
     available: true,
@@ -166,7 +191,9 @@ export function calculateTurnQuotaImpact(currentTurn, previousTurn = null, concu
     concurrentSessionCount: count,
     concurrentSessions,
     isIsolated: count === 0,
-    isReset
+    isReset,
+    isPrimaryReset,
+    isSecondaryReset
   };
 }
 
@@ -212,17 +239,42 @@ export function calculateSessionQuotaImpact(session, allSessions = []) {
 
   let primaryDelta = null;
   let secondaryDelta = null;
-  let isReset = false;
+  let isPrimaryReset = false;
+  let isSecondaryReset = false;
+
+  const primaryResetOccurred = Boolean(
+    lastSnapshot?.primary?.resets_at &&
+    firstSnapshot?.primary?.resets_at &&
+    lastSnapshot.primary.resets_at !== firstSnapshot.primary.resets_at
+  );
+
+  const secondaryResetOccurred = Boolean(
+    lastSnapshot?.secondary?.resets_at &&
+    firstSnapshot?.secondary?.resets_at &&
+    lastSnapshot.secondary.resets_at !== firstSnapshot.secondary.resets_at
+  );
 
   if (startPrimary !== null && endPrimary !== null) {
-    primaryDelta = Math.round((endPrimary - startPrimary) * 100) / 100;
-    if (primaryDelta < 0) isReset = true;
+    if (primaryResetOccurred) {
+      primaryDelta = endPrimary;
+      isPrimaryReset = true;
+    } else {
+      primaryDelta = Math.round((endPrimary - startPrimary) * 100) / 100;
+      if (primaryDelta < 0) isPrimaryReset = true;
+    }
   }
 
   if (startSecondary !== null && endSecondary !== null) {
-    secondaryDelta = Math.round((endSecondary - startSecondary) * 100) / 100;
-    if (secondaryDelta < 0) isReset = true;
+    if (secondaryResetOccurred) {
+      secondaryDelta = endSecondary;
+      isSecondaryReset = true;
+    } else {
+      secondaryDelta = Math.round((endSecondary - startSecondary) * 100) / 100;
+      if (secondaryDelta < 0) isSecondaryReset = true;
+    }
   }
+
+  const isReset = isPrimaryReset || isSecondaryReset;
 
   const concurrency = detectSessionConcurrency(session, allSessions);
 
@@ -237,7 +289,9 @@ export function calculateSessionQuotaImpact(session, allSessions = []) {
     concurrentSessionCount: concurrency.count,
     concurrentSessions: concurrency.sessions,
     isIsolated: concurrency.count === 0,
-    isReset
+    isReset,
+    isPrimaryReset,
+    isSecondaryReset
   };
 }
 

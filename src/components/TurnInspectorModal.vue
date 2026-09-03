@@ -69,6 +69,24 @@ const cacheRate = computed(() => {
   return Math.round((cached / inp) * 100);
 });
 
+function formatTurnDateTime(val) {
+  if (!val) return '';
+  if (typeof val === 'number') {
+    const d = new Date(val);
+    return isNaN(d.getTime()) ? '' : d.toISOString().replace('T', ' ').slice(0, 19);
+  }
+  const str = String(val);
+  if (str.includes('T')) {
+    return str.replace('T', ' ').slice(0, 19);
+  }
+  const num = Number(str);
+  if (!isNaN(num) && num > 1000000000) {
+    const d = new Date(num > 1000000000000 ? num : num * 1000);
+    return isNaN(d.getTime()) ? str : d.toISOString().replace('T', ' ').slice(0, 19);
+  }
+  return str.slice(0, 19);
+}
+
 const sessionQuotaDisplay = computed(() => {
   const q = props.session?.quotaImpact;
   if (!q || !q.available) return null;
@@ -82,7 +100,8 @@ const sessionQuotaDisplay = computed(() => {
     isIsolated: q.isIsolated,
     concurrentCount: q.concurrentSessionCount,
     concurrentSessions: q.concurrentSessions || [],
-    isReset: q.isReset
+    isReset: q.isReset,
+    hasPositiveImpact: (q.primaryDeltaPercent > 0 || q.secondaryDeltaPercent > 0)
   };
 });
 
@@ -98,8 +117,23 @@ function getTurnQuotaDisplay(turn) {
     isIsolated: q.isIsolated,
     concurrentCount: q.concurrentSessionCount,
     concurrentSessions: q.concurrentSessions || [],
-    isReset: q.isReset
+    isReset: q.isReset,
+    isPrimaryReset: q.isPrimaryReset,
+    isSecondaryReset: q.isSecondaryReset
   };
+}
+
+function getTurnAgentType(turn) {
+  return turn?.agentType || props.session?.agentType || 'codex';
+}
+
+function getTurnAgent(turn) {
+  if (turn?.agentLabel) return turn.agentLabel;
+  return getTurnAgentType(turn) === 'antigravity' ? 'Antigravity' : 'Codex';
+}
+
+function getTurnModel(turn) {
+  return turn?.model || props.session?.meta?.model || props.session?.model || (getTurnAgentType(turn) === 'antigravity' ? 'Gemini 3.7 Flash' : 'gpt-5');
 }
 
 const reportableTurnCount = computed(() => {
@@ -813,8 +847,9 @@ function formatToolArg(input) {
               whyItMatters="Shows how much this session (and concurrent threads) shifted your 5-hour and weekly rate limits."
             />:
           </span>
-          <span v-if="sessionQuotaDisplay" class="val mono text-yellow">
+          <span v-if="sessionQuotaDisplay" :class="['val mono', sessionQuotaDisplay.hasPositiveImpact ? 'text-yellow' : (sessionQuotaDisplay.isReset ? 'text-cyan' : 'text-muted')]">
             {{ sessionQuotaDisplay.primaryText }} · {{ sessionQuotaDisplay.secondaryText }}
+            <span v-if="sessionQuotaDisplay.isReset" class="iso-tag text-cyan" title="Provider rate limit window reset occurred during session">↺ Window Reset</span>
             <span v-if="sessionQuotaDisplay.isIsolated" class="iso-tag text-green" title="100% attributed to isolated session">🎯 Isolated</span>
             <span v-else class="iso-tag text-amber iso-clickable-wrap">
               <span class="iso-title">⚠️ {{ sessionQuotaDisplay.concurrentCount }} concurrent:</span>
@@ -955,8 +990,14 @@ function formatToolArg(input) {
           <div class="turn-top">
             <div class="turn-index-group">
               <span class="turn-badge mono">Turn #{{ turn.turnNumber }}</span>
-              <span class="turn-time mono text-dim">{{ (turn.startedAt || '').slice(11, 19) }}</span>
+              <span class="turn-time mono text-dim">{{ formatTurnDateTime(turn.startedAt) }}</span>
               <span v-if="turn.durationMs" class="turn-dur mono text-dim">({{ (turn.durationMs / 1000).toFixed(1) }}s)</span>
+              <span :class="['agent-mini-badge', `badge-${getTurnAgentType(turn)}`]" :title="`Intelligence platform: ${getTurnAgent(turn)}`">
+                {{ getTurnAgentType(turn) === 'antigravity' ? '🌌 Antigravity' : '⚡ Codex' }}
+              </span>
+              <span class="turn-model-badge mono" :title="`Model: ${getTurnModel(turn)}`">
+                🧠 {{ getTurnModel(turn) }}
+              </span>
             </div>
 
             <!-- Per Turn Efficiency Score Badge -->
@@ -1017,22 +1058,23 @@ function formatToolArg(input) {
                 <Tooltip
                   placement="top"
                   title="Account-Level Quota Delta"
-                  :text="`5-hour limit delta: ${getTurnQuotaDisplay(turn).primaryText}, weekly limit delta: ${getTurnQuotaDisplay(turn).secondaryText}. Current: ${getTurnQuotaDisplay(turn).levelText}.`"
+                  :text="`5-hour limit delta: ${getTurnQuotaDisplay(turn).primaryText}, weekly limit delta: ${getTurnQuotaDisplay(turn).secondaryText}. Current: ${getTurnQuotaDisplay(turn).levelText}.${turn.quotaImpact?.isReset ? ' (Window reset occurred)' : ''}`"
                   why-it-matters="Shows the account-wide quota consumed during this turn. If other sessions executed in parallel, that concurrent activity is indicated."
                 >
                   <span class="quota-wrap">
                     <span class="quota-icon">⚡</span>
                     <span class="quota-lbl">Account Δ:</span>
-                    <span :class="['quota-delta', (turn.quotaImpact?.primaryDeltaPercent > 0 ? 'text-yellow' : (turn.quotaImpact?.primaryDeltaPercent < 0 ? 'text-green' : 'text-muted'))]">
+                    <span :class="['quota-delta', (turn.quotaImpact?.primaryDeltaPercent > 0 ? 'text-yellow' : (turn.quotaImpact?.primaryDeltaPercent < 0 || turn.quotaImpact?.isPrimaryReset ? 'text-cyan' : 'text-muted'))]">
                       {{ getTurnQuotaDisplay(turn).primaryText }}
                     </span>
                     <span class="sep">•</span>
-                    <span :class="['quota-delta', (turn.quotaImpact?.secondaryDeltaPercent > 0 ? 'text-yellow' : (turn.quotaImpact?.secondaryDeltaPercent < 0 ? 'text-green' : 'text-muted'))]">
+                    <span :class="['quota-delta', (turn.quotaImpact?.secondaryDeltaPercent > 0 ? 'text-yellow' : (turn.quotaImpact?.secondaryDeltaPercent < 0 || turn.quotaImpact?.isSecondaryReset ? 'text-cyan' : 'text-muted'))]">
                       {{ getTurnQuotaDisplay(turn).secondaryText }}
                     </span>
                     <span class="sep">•</span>
                     <span class="quota-level text-dim">{{ getTurnQuotaDisplay(turn).levelText }}</span>
                     <span class="sep">•</span>
+                    <span v-if="turn.quotaImpact?.isReset" class="iso-badge text-cyan" title="Provider rate limit window reset or rolled off between turns">↺ Window Reset</span>
                     <span v-if="turn.quotaImpact?.isIsolated" class="iso-badge text-green" title="No other sessions active during this turn window">🎯 Isolated</span>
                     <span v-else class="iso-badge text-amber iso-clickable-wrap">
                       <span class="iso-title">⚠️ {{ turn.quotaImpact?.concurrentSessionCount }} concurrent:</span>
@@ -1622,6 +1664,43 @@ function formatToolArg(input) {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.agent-mini-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 4px;
+  letter-spacing: 0.02em;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.badge-antigravity {
+  background: rgba(168, 85, 247, 0.15);
+  color: var(--accent-purple, #a855f7);
+  border: 1px solid rgba(168, 85, 247, 0.3);
+}
+
+.badge-codex {
+  background: rgba(45, 202, 245, 0.15);
+  color: var(--dashboard-cyan, #2dcaf5);
+  border: 1px solid rgba(45, 202, 245, 0.3);
+}
+
+.turn-model-badge {
+  font-size: 0.72rem;
+  font-weight: 500;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .turn-badge {
@@ -1868,6 +1947,8 @@ function formatToolArg(input) {
 .text-xs { font-size: 0.72rem; }
 .text-green { color: var(--accent-green); }
 .text-purple { color: var(--accent-purple); }
+.text-cyan { color: var(--dashboard-cyan, #2dcaf5); }
+.text-yellow { color: var(--accent-yellow, #f5b301); }
 
 /* In-Turn Actions & Guidance Logger */
 .turn-actions-card {

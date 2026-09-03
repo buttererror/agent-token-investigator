@@ -1,5 +1,8 @@
 # Provider-grounded pacing and recommendations
 
+For the diagnostic reasoning and long-term solution direction, see
+[Provider Usage Investigation: Diagnosis and Solution Direction](provider-usage-investigation-direction-plan.md).
+
 The tracker is read-only. Provider-reported `rate_limits` snapshots are the
 authority for quota percentage and reset time. Transcript telemetry is a
 separate diagnostic signal: it explains likely contributors (fresh input,
@@ -47,4 +50,3 @@ All quota calculation and concurrency detection logic is isolated in [`server/qu
    - Identifies whether a turn was `🎯 Isolated` (100% directly attributed) or executed alongside `⚠️ Concurrent Sessions`.
    - Surfaces interactive `🔗 Concurrent Session` navigation buttons in `TurnInspectorModal.vue` and `SessionList.vue` to allow immediate cross-thread inspection.
    - Fully verified with unit tests in `tests/quotaCalculator.test.js`.
-
