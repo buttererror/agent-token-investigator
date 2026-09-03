@@ -17,7 +17,7 @@ const props = defineProps({
   }
 });
 
-const emit = defineEmits(['close', 'export-handoff', 'guidance-updated', 'inspect-session']);
+const emit = defineEmits(['close', 'export-handoff', 'guidance-updated', 'inspect-session', 'open-linter']);
 
 function openConcurrentSession(concurrentRef) {
   const sid = typeof concurrentRef === 'string' ? concurrentRef : concurrentRef?.sessionId;
@@ -1114,7 +1114,16 @@ function formatToolArg(input) {
 
           <!-- User Prompt Section -->
           <div v-if="turn.userPrompt" class="prompt-section">
-            <div class="section-label">User Request:</div>
+            <div class="prompt-section-head">
+              <span class="section-label">User Request:</span>
+              <button 
+                class="btn-lint-turn-prompt mono"
+                :title="`Lint this prompt using ${getTurnAgent(turn)} rules`"
+                @click.stop="$emit('open-linter', { prompt: turn.userPrompt, agent: getTurnAgentType(turn) })"
+              >
+                <span>🔍</span> Lint Turn Prompt ({{ getTurnAgent(turn) }})
+              </button>
+            </div>
             <div class="prompt-bubble mono">{{ turn.userPrompt }}</div>
           </div>
 
@@ -1890,6 +1899,34 @@ function formatToolArg(input) {
   text-transform: uppercase;
   color: var(--text-dim);
   margin-bottom: 4px;
+}
+
+.prompt-section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.btn-lint-turn-prompt {
+  background: rgba(45, 202, 245, 0.1);
+  border: 1px solid rgba(45, 202, 245, 0.3);
+  color: var(--dashboard-cyan, #2dcaf5);
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s ease;
+}
+
+.btn-lint-turn-prompt:hover {
+  background: rgba(45, 202, 245, 0.22);
+  border-color: var(--dashboard-cyan, #2dcaf5);
+  transform: translateY(-1px);
 }
 
 .prompt-bubble {

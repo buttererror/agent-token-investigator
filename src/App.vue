@@ -52,6 +52,8 @@ const { undoLastAction } = useActionSelector();
 
 const isGuideOpen = ref(false);
 const isLinterOpen = ref(false);
+const linterInitialPrompt = ref('');
+const linterInitialAgent = ref('codex');
 const isHandoffOpen = ref(false);
 const isSkillGenOpen = ref(false);
 const isBenchmarkOpen = ref(false);
@@ -59,6 +61,14 @@ const isGuidanceRecordsOpen = ref(false);
 const isIssuesOpen = ref(false);
 const issuesCount = ref(0);
 const activeInspectSession = ref(null);
+
+function handleOpenLinter(payload = {}) {
+  const prompt = typeof payload === 'string' ? payload : (payload?.prompt || '');
+  const agent = typeof payload === 'object' && payload?.agent ? payload.agent : activeAgent.value;
+  linterInitialPrompt.value = prompt;
+  linterInitialAgent.value = agent || activeAgent.value || 'codex';
+  isLinterOpen.value = true;
+}
 
 import { computed } from 'vue';
 const isScopeStale = computed(() => {
@@ -145,7 +155,7 @@ onMounted(() => {
       @change-time-range="handleTimeRangeChange"
       @toggle-refresh="toggleRefresh"
       @open-guide="isGuideOpen = true"
-      @open-linter="isLinterOpen = true"
+      @open-linter="handleOpenLinter"
       @open-benchmark="isBenchmarkOpen = true"
       @open-guidance-records="isGuidanceRecordsOpen = true"
       @open-issues="isIssuesOpen = true"
@@ -225,11 +235,14 @@ onMounted(() => {
       @close="activeInspectSession = null"
       @inspect-session="handleInspect"
       @export-handoff="handleExportHandoff"
+      @open-linter="handleOpenLinter"
       @guidance-updated="() => { fetchGuidanceRecords(activeWorkspace); fetchIssuesCount(activeWorkspace); }"
     />
 
     <ActionPromptLinterModal 
       :is-open="isLinterOpen"
+      :initial-prompt="linterInitialPrompt"
+      :initial-agent="linterInitialAgent"
       @close="isLinterOpen = false"
     />
 
