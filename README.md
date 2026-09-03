@@ -1,4 +1,4 @@
-# ⚡ Agent Token Tracker & Optimization Advisor
+# ⚡ Agent Token Investigator & Optimization Advisor
 
 An intelligent, 100% local developer platform and CLI utility built with **Vue 3 Composition API** and **Node.js** that tracks Codex token usage, monitors real-time 5-hour and weekly rate limits, detects context bloat and tool output noise, and executes 7 high-leverage optimization actions.
 
@@ -8,14 +8,14 @@ An intelligent, 100% local developer platform and CLI utility built with **Vue 3
 
 ### 1. Launch the Vue 3 Web Dashboard
 ```bash
-cd agent-token-tracker
+cd agent-token-investigator
 npm start
 ```
 Then open **[http://localhost:3333](http://localhost:3333)** in your browser.
 
 ### 2. Run the Terminal CLI Report
 ```bash
-cd agent-token-tracker
+cd agent-token-investigator
 node cli.js
 ```
 
@@ -61,7 +61,7 @@ node cli.js
 
 ## 🔍 How Project Discovery Works
 
-The tracker aggregates projects across **3 complementary mechanisms** without requiring manual configuration:
+The investigator aggregates projects across **3 complementary mechanisms** without requiring manual configuration:
 
 ```mermaid
 graph TD
@@ -77,7 +77,7 @@ graph TD
 1. **Auto-Discovery from Agent Trajectories**:
    - The parser reads session logs from `~/.codex/sessions/`.
    - Each conversation records the directory the agent was working in (`session.meta.cwd`).
-   - The tracker traverses up the path to the canonical Git root (`.git`), groups sessions by project, and displays session counts (e.g. `📁 my-project (14 sessions)`).
+   - The investigator traverses up the path to the canonical Git root (`.git`), groups sessions by project, and displays session counts (e.g. `📁 my-project (14 sessions)`).
 2. **Current Active Directory**:
    - The directory where the server is executed (`process.cwd()`) is automatically registered as the default workspace.
 3. **Custom Local Projects (`📁+`)**:
