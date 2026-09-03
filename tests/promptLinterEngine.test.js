@@ -63,6 +63,9 @@ describe('Pre-Flight Prompt Linter Engine Tests', () => {
     const res = lintPrompt('Fix the login bug and also rewrite the navbar and also add unit tests');
     assert.ok(res.warnings.some(w => w.type === 'MULTI_TASK_SPRAWL'));
     assert.equal(res.riskLevel, 'HIGH');
+    assert.ok(res.optimizedPrompt.includes('Stage 1'));
+    assert.ok(res.optimizedPrompt.includes('Fix the login bug'));
+    assert.notEqual(res.optimizedPrompt, 'Fix the login bug and also rewrite the navbar and also add unit tests');
   });
 
   test('Rule 9: detects unscoped linter runs and appends quiet flag', () => {
@@ -75,5 +78,25 @@ describe('Pre-Flight Prompt Linter Engine Tests', () => {
     const res = lintPrompt('Work overnight autonomously until it is complete', 'antigravity');
     assert.ok(res.warnings.some(w => w.type === 'ANTIGRAVITY_SLASH_COMMAND'));
     assert.ok(res.optimizedPrompt.startsWith('/goal'));
+  });
+
+  test('Session Context: detects thread depth inflation when turnCount >= 15 and projects totals', () => {
+    const sessionCtx = {
+      turnCount: 16,
+      accumulatedContextTokens: 60000,
+      agentType: 'codex'
+    };
+    const res = lintPrompt('Fix the null pointer in auth.js', 'codex', sessionCtx);
+    assert.ok(res.warnings.some(w => w.type === 'THREAD_DEPTH_INFLATION'));
+    assert.ok(res.sessionContext.nextTurnNumber === 17);
+    assert.ok(res.sessionContext.projectedSessionTotal > 60000);
+    assert.equal(res.isClean, false);
+  });
+
+  test('Clean Prompt: flags isClean: true when prompt has no anti-patterns', () => {
+    const res = lintPrompt('Inspect lines 20-40 in src/auth.js and check the token expiry condition', 'codex');
+    assert.equal(res.isClean, true);
+    assert.equal(res.warnings.length, 0);
+    assert.equal(res.riskScore, 100);
   });
 });

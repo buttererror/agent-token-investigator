@@ -4,12 +4,21 @@
  * Supports agent-specific targeting for OpenAI Codex and Google Antigravity.
  */
 
-export function lintPrompt(promptText, targetAgent = 'codex') {
+export function lintPrompt(promptText, targetAgent = 'codex', sessionContext = null) {
   if (!promptText || !promptText.trim()) {
+    const sessionTurnCount = sessionContext?.turnCount || 0;
+    const accumulatedContextTokens = sessionContext?.accumulatedContextTokens || sessionContext?.totalTokens || 0;
     return {
       riskLevel: 'LOW',
       riskScore: 100,
       targetAgent,
+      isClean: true,
+      sessionContext: sessionContext ? {
+        turnCount: sessionTurnCount,
+        accumulatedContextTokens,
+        nextTurnNumber: sessionTurnCount + 1,
+        projectedSessionTotal: accumulatedContextTokens
+      } : null,
       estimatedOriginalTokens: 500,
       estimatedOptimizedTokens: 500,
       tokensSaved: 0,
@@ -178,7 +187,8 @@ export function lintPrompt(promptText, targetAgent = 'codex') {
   }
 
   // 8. Multi-task sprawl ("Kitchen-Sink Turn")
-  const taskConjunctions = (text.match(/\b(and also|and then also|after that please|and then afterwards|and also add|and also fix|and also rewrite)\b/gi) || []).length;
+  const taskSplitRegex = /\s*\b(?:and also|and then also|after that please|and then afterwards|and also add|and also fix|and also rewrite|and then)\b\s*/i;
+  const taskConjunctions = (text.match(/\b(?:and also|and then also|after that please|and then afterwards|and also add|and also fix|and also rewrite|and then)\b/gi) || []).length;
   if (taskConjunctions >= 2) {
     addRule({
       id: 'MULTI_TASK_SPRAWL',
@@ -190,6 +200,13 @@ export function lintPrompt(promptText, targetAgent = 'codex') {
       tip: 'Break large work into single-objective turns (under 15 turns per thread) to prevent quadratic context cost inflation.'
     });
     tips.push('Execute the primary objective first, verify it, then proceed to subsequent tasks in follow-up turns.');
+
+    const parts = optimized.split(new RegExp(taskSplitRegex, 'gi')).map(p => p.trim().replace(/\.+$/, '')).filter(Boolean);
+    if (parts.length > 1) {
+      const primary = parts[0];
+      const deferred = parts.slice(1).join(', ');
+      optimized = `${primary}. (Stage 1: focus exclusively on this primary objective first; defer "${deferred}" to follow-up turns).`;
+    }
   }
 
   // 9. Unscoped linter / compiler runs
@@ -231,17 +248,42 @@ export function lintPrompt(promptText, targetAgent = 'codex') {
     }
   }
 
+  // 11. Session Context Aware Rules
+  const sessionTurnCount = sessionContext?.turnCount || 0;
+  const accumulatedContextTokens = sessionContext?.accumulatedContextTokens || sessionContext?.totalTokens || 0;
+
+  if (sessionTurnCount >= 15) {
+    addRule({
+      id: 'THREAD_DEPTH_INFLATION',
+      label: 'High Thread Depth (Handoff Recommended)',
+      severity: 'HIGH',
+      penalty: 30,
+      tokens: Math.round(accumulatedContextTokens * 0.35) || 15000,
+      warning: `This session is at Turn #${sessionTurnCount}. Appending another turn re-transmits all ~${accumulatedContextTokens.toLocaleString()} historical tokens into context.`,
+      tip: 'Consider triggering a State-Preserving Session Handoff (Action 4) to start a clean thread and preserve cache speed.'
+    });
+  }
+
   // Calculate final risk level & token projections
   let riskLevel = 'LOW';
   if (riskScore < 50) riskLevel = 'HIGH';
   else if (riskScore < 80) riskLevel = 'MEDIUM';
 
   const estimatedOptimizedTokens = Math.max(Math.round(estimatedTokens * 0.12), 400);
+  const isClean = warnings.length === 0;
+  const projectedSessionTotal = accumulatedContextTokens > 0 ? (accumulatedContextTokens + estimatedTokens) : null;
 
   return {
     riskLevel,
     riskScore: Math.max(riskScore, 10),
     targetAgent,
+    isClean,
+    sessionContext: sessionContext ? {
+      turnCount: sessionTurnCount,
+      accumulatedContextTokens,
+      nextTurnNumber: sessionTurnCount + 1,
+      projectedSessionTotal
+    } : null,
     estimatedOriginalTokens: estimatedTokens,
     estimatedOptimizedTokens,
     tokensSaved: Math.max(estimatedTokens - estimatedOptimizedTokens, 0),

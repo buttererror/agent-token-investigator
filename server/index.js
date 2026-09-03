@@ -153,11 +153,11 @@ app.get('/api/generate-handoff/:id', async (req, res) => {
 // 7. Action 5: Prompt linter
 app.post('/api/lint-prompt', (req, res) => {
   try {
-    const { prompt, targetAgent = 'codex' } = req.body;
+    const { prompt, targetAgent = 'codex', sessionContext = null } = req.body;
     if (!prompt) {
       return res.status(400).json({ error: 'Prompt text is required' });
     }
-    const result = lintPrompt(prompt, targetAgent);
+    const result = lintPrompt(prompt, targetAgent, sessionContext);
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });

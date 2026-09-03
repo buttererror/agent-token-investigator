@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue';
+import { usePromptLinter } from '../composables/usePromptLinter.js';
 import Tooltip from './common/Tooltip.vue';
 
 const props = defineProps({
@@ -134,6 +135,62 @@ function getTurnAgent(turn) {
 
 function getTurnModel(turn) {
   return turn?.model || props.session?.meta?.model || props.session?.model || (getTurnAgentType(turn) === 'antigravity' ? 'Gemini 3.7 Flash' : 'gpt-5');
+}
+
+// Next Turn Simulator State & Logic
+const { 
+  draftPrompt: nextTurnPrompt, 
+  lintResult: nextTurnLintResult, 
+  isLinting: isNextTurnLinting, 
+  evaluatePrompt: evaluateNextTurnPrompt,
+  evaluatePromptImmediate: evaluateNextTurnImmediate
+} = usePromptLinter();
+
+const isNextTurnCopied = ref(false);
+
+const nextTurnAgentType = computed(() => {
+  return props.session?.agentType || 'codex';
+});
+
+const nextTurnAgentLabel = computed(() => {
+  return props.session?.agentLabel || (props.session?.agentType === 'antigravity' ? 'Antigravity' : 'Codex');
+});
+
+const nextTurnModel = computed(() => {
+  return props.session?.meta?.model || props.session?.model || (nextTurnAgentType.value === 'antigravity' ? 'Gemini 3.7 Flash' : 'gpt-5');
+});
+
+const sessionContextForLinter = computed(() => {
+  const turns = props.session?.turns || [];
+  return {
+    turnCount: turns.length,
+    accumulatedContextTokens: props.session?.totalUsage?.total_tokens || 0,
+    agentType: nextTurnAgentType.value,
+    model: nextTurnModel.value
+  };
+});
+
+function handleNextTurnInput() {
+  evaluateNextTurnPrompt(nextTurnPrompt.value, nextTurnAgentType.value, sessionContextForLinter.value);
+}
+
+async function copyNextTurnPrompt() {
+  const textToCopy = nextTurnLintResult.value?.optimizedPrompt || nextTurnPrompt.value;
+  if (!textToCopy) return;
+  try {
+    await navigator.clipboard.writeText(textToCopy);
+    isNextTurnCopied.value = true;
+    setTimeout(() => {
+      isNextTurnCopied.value = false;
+    }, 2000);
+  } catch (e) {}
+}
+
+function applyNextTurnRewrite() {
+  if (nextTurnLintResult.value?.optimizedPrompt) {
+    nextTurnPrompt.value = nextTurnLintResult.value.optimizedPrompt;
+    evaluateNextTurnImmediate(nextTurnPrompt.value, nextTurnAgentType.value, sessionContextForLinter.value);
+  }
 }
 
 const reportableTurnCount = computed(() => {
@@ -1114,16 +1171,7 @@ function formatToolArg(input) {
 
           <!-- User Prompt Section -->
           <div v-if="turn.userPrompt" class="prompt-section">
-            <div class="prompt-section-head">
-              <span class="section-label">User Request:</span>
-              <button 
-                class="btn-lint-turn-prompt mono"
-                :title="`Lint this prompt using ${getTurnAgent(turn)} rules`"
-                @click.stop="$emit('open-linter', { prompt: turn.userPrompt, agent: getTurnAgentType(turn) })"
-              >
-                <span>🔍</span> Lint Turn Prompt ({{ getTurnAgent(turn) }})
-              </button>
-            </div>
+            <div class="section-label">User Request:</div>
             <div class="prompt-bubble mono">{{ turn.userPrompt }}</div>
           </div>
 
@@ -1218,6 +1266,130 @@ function formatToolArg(input) {
                 <button class="btn btn-primary btn-sm" :disabled="isSubmittingTurnNote" @click="saveTurnNote(turn)">
                   {{ isSubmittingTurnNote ? 'Saving...' : 'Save to Guidance Changelog' }}
                 </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Pre-Flight Next Turn Simulator Card -->
+        <div class="next-turn-simulator-card">
+          <div class="simulator-header">
+            <div class="sim-title-group">
+              <span class="sim-badge mono">Turn #{{ (session?.turns?.length || 0) + 1 }}</span>
+              <span class="sim-title">🚀 Pre-Flight Next Turn Sandbox</span>
+              <span class="agent-mini-badge" :class="`badge-${nextTurnAgentType}`">
+                {{ nextTurnAgentType === 'antigravity' ? '🌌 Antigravity' : '⚡ Codex' }}
+              </span>
+              <span class="turn-model-badge mono">🧠 {{ nextTurnModel }}</span>
+            </div>
+
+            <div class="sim-context-stats mono text-dim">
+              <span>Context: ~{{ (session?.totalUsage?.total_tokens || 0).toLocaleString() }} tok</span>
+              <span class="sep">•</span>
+              <span :class="(session?.turns?.length || 0) >= 15 ? 'text-amber font-semibold' : ''">
+                Turn {{ (session?.turns?.length || 0) }} of 15–20 max
+              </span>
+            </div>
+          </div>
+
+          <!-- Thread Length Warning Banner if >= 15 turns -->
+          <div v-if="(session?.turns?.length || 0) >= 15" class="thread-warning-banner">
+            <span class="warn-icon">⚠️</span>
+            <div class="warn-body">
+              <strong>Thread Length Alert:</strong> This session already has {{ session?.turns?.length }} turns. Adding another turn without a handoff re-ingests full prior context, accelerating rate limits.
+              <button class="handoff-trigger-btn mono" @click="$emit('export-handoff')">
+                <span>🔄</span> Compile Session Handoff (Action 4)
+              </button>
+            </div>
+          </div>
+
+          <!-- Input area -->
+          <div class="sim-input-wrap">
+            <div class="sim-input-head">
+              <label class="sim-label">Draft Next Prompt (Pre-Flight Test):</label>
+              <span v-if="isNextTurnLinting" class="text-cyan mono text-xs">Evaluating prompt against rules...</span>
+            </div>
+            <textarea
+              v-model="nextTurnPrompt"
+              class="sim-textarea mono"
+              rows="3"
+              :placeholder="`Type your upcoming prompt to test before sending to ${nextTurnAgentLabel} (e.g. 'Run tests with --bail 1 and inspect src/auth.js:L20-L45')...`"
+              @input="handleNextTurnInput"
+            ></textarea>
+          </div>
+
+          <!-- Live Linter Feedback -->
+          <div v-if="nextTurnLintResult && nextTurnPrompt.trim()" class="sim-result-wrap">
+            <!-- If Clean (No Warnings) -->
+            <div v-if="nextTurnLintResult.isClean || nextTurnLintResult.warnings.length === 0" class="sim-clean-card">
+              <div class="clean-badge-row">
+                <span class="badge badge-green">✅ LEAN & SCOPED PROMPT (Score: 100/100)</span>
+                <span class="mono text-xs text-dim" v-if="nextTurnLintResult.sessionContext?.projectedSessionTotal">
+                  Projected Session Total: ~{{ nextTurnLintResult.sessionContext.projectedSessionTotal.toLocaleString() }} tok
+                </span>
+              </div>
+              <p class="clean-desc">
+                No token-expansion anti-patterns detected. This prompt is safe and cost-effective to dispatch to {{ nextTurnAgentLabel }}.
+              </p>
+              <button 
+                :class="['btn btn-sm', isNextTurnCopied ? 'btn-copied' : 'btn-primary']"
+                @click="copyNextTurnPrompt"
+              >
+                <span>{{ isNextTurnCopied ? '✅' : '📋' }}</span>
+                {{ isNextTurnCopied ? 'Copied to Clipboard!' : `Copy Prompt for ${nextTurnAgentLabel}` }}
+              </button>
+            </div>
+
+            <!-- If Warnings Detected -->
+            <div v-else class="sim-warnings-card">
+              <div class="sim-warning-top">
+                <span :class="['badge', nextTurnLintResult.riskLevel === 'HIGH' ? 'badge-red' : 'badge-yellow']">
+                  {{ nextTurnLintResult.riskLevel }} TOKEN RISK (Score: {{ nextTurnLintResult.riskScore }}/100)
+                </span>
+                <div class="sim-savings mono text-xs">
+                  <span class="text-dim">Est. Turn Burn: ~{{ nextTurnLintResult.estimatedOriginalTokens.toLocaleString() }} tok</span>
+                  <span class="arrow">➔</span>
+                  <span class="text-green">Optimized: ~{{ nextTurnLintResult.estimatedOptimizedTokens.toLocaleString() }} tok</span>
+                </div>
+              </div>
+
+              <!-- Rule Chips -->
+              <div v-if="nextTurnLintResult.ruleMatches?.length > 0" class="sim-chips">
+                <span 
+                  v-for="(r, idx) in nextTurnLintResult.ruleMatches" 
+                  :key="idx" 
+                  :class="['rule-chip', `severity-${r.severity.toLowerCase()}`]"
+                >
+                  {{ r.label }}
+                </span>
+              </div>
+
+              <!-- Warnings List -->
+              <div class="sim-warn-list">
+                <div v-for="(w, idx) in nextTurnLintResult.warnings" :key="idx" class="sim-warn-row text-xs">
+                  <span>🚨 <strong>{{ w.category }}:</strong> {{ w.message }}</span>
+                </div>
+              </div>
+
+              <!-- Optimized Rewrite -->
+              <div class="sim-rewrite-box">
+                <span class="rewrite-title">✨ Recommended Token-Lean Rewrite:</span>
+                <div class="sim-rewrite-text mono">{{ nextTurnLintResult.optimizedPrompt }}</div>
+                <div class="sim-actions">
+                  <button 
+                    :class="['btn btn-sm', isNextTurnCopied ? 'btn-copied' : 'btn-primary']"
+                    @click="copyNextTurnPrompt"
+                  >
+                    <span>{{ isNextTurnCopied ? '✅' : '📋' }}</span>
+                    {{ isNextTurnCopied ? 'Copied!' : `Copy Optimized Prompt` }}
+                  </button>
+                  <button 
+                    class="btn btn-secondary btn-sm"
+                    @click="applyNextTurnRewrite"
+                  >
+                    <span>↵</span> Apply to Input
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -2421,5 +2593,209 @@ function formatToolArg(input) {
 
 .w-full {
   width: 100%;
+}
+
+/* Pre-Flight Next Turn Simulator Card */
+.next-turn-simulator-card {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(45, 202, 245, 0.35);
+  border-radius: 12px;
+  padding: 16px;
+  margin-top: 18px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+}
+
+.simulator-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sim-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sim-badge {
+  background: rgba(45, 202, 245, 0.15);
+  color: var(--dashboard-cyan, #2dcaf5);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.sim-title {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.sim-context-stats {
+  font-size: 0.72rem;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.thread-warning-banner {
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  padding: 10px 12px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.78rem;
+  color: var(--text-main);
+}
+
+.handoff-trigger-btn {
+  background: rgba(245, 158, 11, 0.2);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: var(--accent-yellow, #f59e0b);
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-left: 8px;
+  transition: background 0.2s;
+}
+
+.handoff-trigger-btn:hover {
+  background: rgba(245, 158, 11, 0.35);
+}
+
+.sim-input-wrap {
+  margin-bottom: 12px;
+}
+
+.sim-input-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.sim-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.sim-textarea {
+  width: 100%;
+  background-color: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-main);
+  padding: 10px 12px;
+  font-size: 0.82rem;
+  outline: none;
+  resize: vertical;
+}
+
+.sim-textarea:focus {
+  border-color: var(--dashboard-cyan, #2dcaf5);
+}
+
+.sim-clean-card {
+  background: rgba(34, 197, 94, 0.08);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  padding: 12px 14px;
+  border-radius: 8px;
+}
+
+.clean-badge-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.clean-desc {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+  line-height: 1.4;
+}
+
+.sim-warnings-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  padding: 14px;
+  border-radius: 8px;
+}
+
+.sim-warning-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sim-savings {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sim-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.sim-warn-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.sim-warn-row {
+  color: var(--accent-red, #ef4444);
+}
+
+.sim-rewrite-box {
+  background: rgba(45, 202, 245, 0.05);
+  border: 1px solid rgba(45, 202, 245, 0.2);
+  padding: 10px 12px;
+  border-radius: 8px;
+}
+
+.rewrite-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--dashboard-cyan, #2dcaf5);
+}
+
+.sim-rewrite-text {
+  background: #0b0f19;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  color: var(--text-main);
+  margin: 6px 0 8px 0;
+  border: 1px solid var(--border-color);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.sim-actions {
+  display: flex;
+  gap: 8px;
 }
 </style>

@@ -224,8 +224,27 @@ watch(() => props.isOpen, (open) => {
             </div>
           </div>
 
-          <!-- Optimized Lean Rewrite -->
-          <div class="optimized-section">
+          <!-- Clean Prompt State -->
+          <div v-if="lintResult.isClean || lintResult.warnings.length === 0" class="clean-prompt-section">
+            <div class="clean-head">
+              <span class="clean-title">✅ No Anti-Patterns Detected</span>
+            </div>
+            <p class="clean-msg">
+              This prompt is already lean, focused, and well-scoped. It introduces no known context inflation risks.
+            </p>
+            <div class="rewrite-actions">
+              <button 
+                :class="['btn btn-sm', isCopied ? 'btn-copied' : 'btn-primary']"
+                @click="copyOptimized"
+              >
+                <span>{{ isCopied ? '✅' : '📋' }}</span>
+                {{ isCopied ? 'Copied to Clipboard!' : 'Copy Prompt' }}
+              </button>
+            </div>
+          </div>
+
+          <!-- Optimized Lean Rewrite (Shown only when anti-patterns were found) -->
+          <div v-else class="optimized-section">
             <div class="opt-head">
               <span class="opt-title">✨ Recommended Token-Lean Rewrite:</span>
             </div>
@@ -573,6 +592,31 @@ watch(() => props.isOpen, (open) => {
 
 .warn-msg {
   color: var(--text-muted);
+}
+
+.clean-prompt-section {
+  background-color: rgba(34, 197, 94, 0.08);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  padding: 14px;
+  border-radius: 10px;
+  margin-bottom: 12px;
+}
+
+.clean-head {
+  margin-bottom: 6px;
+}
+
+.clean-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--accent-green, #22c55e);
+}
+
+.clean-msg {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+  line-height: 1.4;
 }
 
 .optimized-section {
