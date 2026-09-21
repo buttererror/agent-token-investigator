@@ -14,6 +14,7 @@ import ActionSkillGeneratorModal from './components/ActionSkillGeneratorModal.vu
 import BenchmarkModal from './components/BenchmarkModal.vue';
 import GuidanceRecordsModal from './components/GuidanceRecordsModal.vue';
 import AgentIssuesModal from './components/AgentIssuesModal.vue';
+import ProjectSelectorModal from './components/ProjectSelectorModal.vue';
 
 const {
   overview,
@@ -59,6 +60,7 @@ const isSkillGenOpen = ref(false);
 const isBenchmarkOpen = ref(false);
 const isGuidanceRecordsOpen = ref(false);
 const isIssuesOpen = ref(false);
+const isProjectPickerOpen = ref(false);
 const issuesCount = ref(0);
 const activeInspectSession = ref(null);
 
@@ -107,6 +109,20 @@ function toggleRefresh() {
 function handleWorkspaceChange(newPath) {
   setWorkspace(newPath);
   fetchIssuesCount(newPath);
+}
+
+async function handleProjectAdded(newProject) {
+  await refresh();
+  if (newProject && newProject.path) {
+    handleWorkspaceChange(newProject.path);
+  }
+}
+
+async function handleProjectRemoved(removedPath) {
+  await refresh();
+  if (activeWorkspace.value === removedPath) {
+    handleWorkspaceChange('all');
+  }
 }
 
 function handleAgentChange(newAgent) {
@@ -159,6 +175,7 @@ onMounted(() => {
       @open-benchmark="isBenchmarkOpen = true"
       @open-guidance-records="isGuidanceRecordsOpen = true"
       @open-issues="isIssuesOpen = true"
+      @open-project-picker="isProjectPickerOpen = true"
     />
 
     <!-- Main Content Views -->
@@ -271,6 +288,16 @@ onMounted(() => {
       @close="isIssuesOpen = false"
       @issues-updated="cnt => issuesCount = cnt"
     />
+
+    <ProjectSelectorModal 
+      v-if="isProjectPickerOpen"
+      :active-workspace="activeWorkspace"
+      :projects="projects"
+      @close="isProjectPickerOpen = false"
+      @project-selected="handleWorkspaceChange"
+      @project-added="handleProjectAdded"
+      @project-removed="handleProjectRemoved"
+    />
   </div>
 </template>
 
@@ -310,4 +337,3 @@ onMounted(() => {
   }
 }
 </style>
-

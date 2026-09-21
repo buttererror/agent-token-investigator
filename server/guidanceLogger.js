@@ -3,6 +3,7 @@ import path from 'path';
 import os from 'os';
 import { getAllSessions } from './parser.js';
 import { loadCustomProjects } from './customProjects.js';
+import { normalizeWorkspacePath } from './pathUtils.js';
 
 const BACKUP_DIR = path.resolve('.backups');
 const LOG_FILE = path.join(BACKUP_DIR, 'guidance-history.json');
@@ -13,7 +14,7 @@ if (!fs.existsSync(BACKUP_DIR)) {
 
 function normalizeDir(p) {
   if (!p) return '';
-  return path.resolve(p).replace(/[\/\\]+$/, '').toLowerCase();
+  return normalizeWorkspacePath(p);
 }
 
 /**
@@ -133,28 +134,55 @@ export function getGuidanceRecordsForProject(projectPath = null) {
 }
 
 /**
- * Finds the canonical project root (resolving subfolders to the Git repository root)
+ * Finds the canonical project root (resolving subfolders to Git root or project config root)
  */
 export function findProjectRoot(startDir) {
   if (!startDir) return process.cwd();
   let curr = path.resolve(startDir);
+  try {
+    if (fs.existsSync(curr) && fs.statSync(curr).isFile()) {
+      curr = path.dirname(curr);
+    }
+  } catch {}
+
+  const lower = curr.toLowerCase();
+  if (lower.includes('.gemini') || lower.includes('antigravity\\brain') || lower.includes('antigravity/brain')) {
+    return null;
+  }
+
   const rootDir = path.parse(curr).root;
+  let candidate = null;
+
   while (curr && curr !== rootDir) {
-    if (fs.existsSync(path.join(curr, '.git'))) {
+    const hasGit = fs.existsSync(path.join(curr, '.git'));
+    const hasPkg = fs.existsSync(path.join(curr, 'package.json'));
+    const hasAgents = fs.existsSync(path.join(curr, 'AGENTS.md'));
+    const hasAgentsDir = fs.existsSync(path.join(curr, '.agents'));
+    const hasPy = fs.existsSync(path.join(curr, 'pyproject.toml')) || fs.existsSync(path.join(curr, 'requirements.txt'));
+    const hasCargo = fs.existsSync(path.join(curr, 'Cargo.toml'));
+    const hasGo = fs.existsSync(path.join(curr, 'go.mod'));
+
+    if (hasGit) {
       return curr;
     }
+
+    if (hasPkg || hasAgents || hasAgentsDir || hasPy || hasCargo || hasGo) {
+      if (!candidate) candidate = curr;
+    }
+
     curr = path.dirname(curr);
   }
-  return path.resolve(startDir);
+
+  return candidate || (fs.existsSync(startDir) ? path.resolve(startDir) : null);
 }
 
 /**
- * Discovers tracked projects from active sessions and predefined locations
+ * Discovers tracked projects from active sessions, root directory, and predefined locations
  */
 export async function getTrackedProjects() {
   const projectMap = new Map();
 
-  // Current workspace as default
+  // 1. Current workspace as default
   const currentDir = process.cwd();
   if (fs.existsSync(currentDir)) {
     projectMap.set(normalizeDir(currentDir), {
@@ -166,7 +194,7 @@ export async function getTrackedProjects() {
     });
   }
 
-  // Custom user-added projects
+  // 2. Custom user-added projects
   const customProjects = loadCustomProjects();
   for (const cp of customProjects) {
     if (fs.existsSync(cp.path)) {
@@ -183,26 +211,67 @@ export async function getTrackedProjects() {
     }
   }
 
+  // 3. Sibling projects at parent root directory (e.g. z:\home\error\apps)
+  try {
+    const parentDir = path.dirname(currentDir);
+    if (fs.existsSync(parentDir) && parentDir !== currentDir && fs.statSync(parentDir).isDirectory()) {
+      const siblings = fs.readdirSync(parentDir, { withFileTypes: true });
+      for (const sib of siblings) {
+        if (sib.name.startsWith('.') || sib.name === 'node_modules' || sib.name === 'dist') continue;
+        if (sib.isDirectory()) {
+          const sibPath = path.join(parentDir, sib.name);
+          const hasProjectMarker = fs.existsSync(path.join(sibPath, 'package.json')) ||
+                                   fs.existsSync(path.join(sibPath, '.git')) ||
+                                   fs.existsSync(path.join(sibPath, 'AGENTS.md')) ||
+                                   fs.existsSync(path.join(sibPath, '.agents')) ||
+                                   fs.existsSync(path.join(sibPath, 'pyproject.toml'));
+          if (hasProjectMarker) {
+            const key = normalizeDir(sibPath);
+            if (!projectMap.has(key)) {
+              projectMap.set(key, {
+                path: sibPath,
+                name: sib.name,
+                description: `Discovered in root directory (${sib.name})`,
+                isDefault: false,
+                isCustom: false,
+                sessionCount: 0
+              });
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    // ignore non-critical parent directory read error
+  }
+
+  // 4. Discover from agent sessions (Codex and Antigravity)
   try {
     const sessions = await getAllSessions();
     for (const session of sessions) {
       const cwd = session.meta?.cwd;
-      if (cwd && fs.existsSync(cwd)) {
+      if (cwd) {
         const canonicalRoot = findProjectRoot(cwd);
-        const key = normalizeDir(canonicalRoot);
+        if (canonicalRoot && fs.existsSync(canonicalRoot)) {
+          const rootDir = path.parse(canonicalRoot).root;
+          if (canonicalRoot === rootDir || canonicalRoot === os.homedir()) {
+            continue;
+          }
+          const key = normalizeDir(canonicalRoot);
 
-        if (!projectMap.has(key)) {
-          projectMap.set(key, {
-            path: canonicalRoot,
-            name: path.basename(canonicalRoot),
-            description: `Auto-discovered workspace (${path.basename(canonicalRoot)})`,
-            isDefault: false,
-            isCustom: false,
-            sessionCount: 1
-          });
-        } else {
-          const item = projectMap.get(key);
-          item.sessionCount = (item.sessionCount || 0) + 1;
+          if (!projectMap.has(key)) {
+            projectMap.set(key, {
+              path: canonicalRoot,
+              name: path.basename(canonicalRoot),
+              description: `Auto-discovered workspace (${path.basename(canonicalRoot)})`,
+              isDefault: false,
+              isCustom: false,
+              sessionCount: 1
+            });
+          } else {
+            const item = projectMap.get(key);
+            item.sessionCount = (item.sessionCount || 0) + 1;
+          }
         }
       }
     }

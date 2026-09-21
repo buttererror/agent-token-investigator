@@ -2,8 +2,71 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
-const BRAIN_DIR = path.join(os.homedir(), '.gemini', 'antigravity', 'brain');
 const fileCache = new Map();
+
+/**
+ * Detects current runtime operating system environment (Windows, WSL, Linux, or macOS)
+ */
+export function detectEnvironment() {
+  if (process.platform === 'win32') return 'windows';
+  if (process.platform === 'linux') {
+    const isWsl = (os.release && os.release().toLowerCase().includes('microsoft')) ||
+      Boolean(process.env.WSL_DISTRO_NAME || process.env.WSL_INTEROP);
+    if (isWsl) return 'wsl';
+    try {
+      if (fs.existsSync('/proc/version') && fs.readFileSync('/proc/version', 'utf8').toLowerCase().includes('microsoft')) {
+        return 'wsl';
+      }
+    } catch {}
+    return 'linux';
+  }
+  if (process.platform === 'darwin') return 'macos';
+  return 'unknown';
+}
+
+/**
+ * Dynamically resolves the Antigravity session brain directory across Windows, WSL, and Linux
+ */
+export function getAntigravityBrainDir() {
+  if (process.env.ANTIGRAVITY_BRAIN_DIR && fs.existsSync(process.env.ANTIGRAVITY_BRAIN_DIR)) {
+    return process.env.ANTIGRAVITY_BRAIN_DIR;
+  }
+
+  const env = detectEnvironment();
+  const candidates = [];
+
+  if (env === 'windows') {
+    candidates.push(path.join(os.homedir(), '.gemini', 'antigravity', 'brain'));
+    if (process.env.USERPROFILE) {
+      candidates.push(path.join(process.env.USERPROFILE, '.gemini', 'antigravity', 'brain'));
+    }
+  } else if (env === 'wsl') {
+    // 1. Check mounted Windows host user folders under /mnt/c/Users
+    try {
+      if (fs.existsSync('/mnt/c/Users')) {
+        const winUsers = fs.readdirSync('/mnt/c/Users');
+        for (const user of winUsers) {
+          if (['Public', 'Default', 'All Users', 'Default User'].includes(user)) continue;
+          candidates.push(path.join('/mnt/c/Users', user, '.gemini', 'antigravity', 'brain'));
+        }
+      }
+    } catch {}
+
+    // 2. Fallback to local WSL home in case Antigravity CLI ran natively in Linux
+    candidates.push(path.join(os.homedir(), '.gemini', 'antigravity', 'brain'));
+  } else {
+    // Pure Linux or macOS
+    candidates.push(path.join(os.homedir(), '.gemini', 'antigravity', 'brain'));
+  }
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return path.join(os.homedir(), '.gemini', 'antigravity', 'brain');
+}
 
 /**
  * Estimates token count from character and word lengths
@@ -32,13 +95,14 @@ function formatToolArg(input) {
  */
 export function findAntigravitySessions() {
   const results = [];
-  if (!fs.existsSync(BRAIN_DIR)) return results;
+  const brainDir = getAntigravityBrainDir();
+  if (!brainDir || !fs.existsSync(brainDir)) return results;
 
   try {
-    const entries = fs.readdirSync(BRAIN_DIR, { withFileTypes: true });
+    const entries = fs.readdirSync(brainDir, { withFileTypes: true });
     for (const entry of entries) {
       if (entry.isDirectory() && entry.name !== 'tempmediaStorage') {
-        const logPath = path.join(BRAIN_DIR, entry.name, '.system_generated', 'logs', 'transcript.jsonl');
+        const logPath = path.join(brainDir, entry.name, '.system_generated', 'logs', 'transcript.jsonl');
         if (fs.existsSync(logPath)) {
           results.push({
             sessionId: entry.name,
@@ -105,8 +169,15 @@ export async function parseAntigravitySessionFile(sessionId, logPath) {
         const modelMatch = stepContent.match(/Model Selection\` from (?:None|[\w\s\.\(\)\-]+) to ([\w\s\.\(\)\-]+)\./);
         if (modelMatch) modelName = modelMatch[1].trim();
 
-        const cwdMatch = stepContent.match(/->\s*([\/a-zA-Z0-9_\-\.]+)/);
-        if (cwdMatch && !detectedCwd) detectedCwd = cwdMatch[1].trim();
+        // Extract workspace from user information / workspace mapping if present
+        const wsMatch = stepContent.match(/(?:format \[URI\] -> \[CorpusName\]:|active workspaces?)[^\r\n]*\r?\n\s*([^\r\n]+?)\s*->\s*([^\r\n]+)/i);
+        if (wsMatch) {
+          const rawUri = wsMatch[1].trim();
+          const cleanUri = typeof rawUri === 'string' ? rawUri.replace(/^"|"$/g, '').trim().replace(/\\\\/g, '\\') : '';
+          if (cleanUri && !cleanUri.toLowerCase().includes('.gemini') && !cleanUri.toLowerCase().includes('antigravity')) {
+            detectedCwd = cleanUri;
+          }
+        }
 
         if (userPrompt && (threadName === 'Antigravity Session' || threadName === 'Untitled Session')) {
           threadName = userPrompt.split('\n')[0].substring(0, 60);
@@ -132,12 +203,39 @@ export async function parseAntigravitySessionFile(sessionId, logPath) {
               input: tc.args
             });
 
-            // Extract cwd heuristics from tool args
+            // Extract cwd heuristics from tool args (ignore internal brain/gemini paths)
             if (tc.args) {
-              const cleanArg = (v) => typeof v === 'string' ? v.replace(/^"|"$/g, '').trim() : '';
-              if (tc.args.SearchDirectory && !detectedCwd) detectedCwd = cleanArg(tc.args.SearchDirectory);
-              if (tc.args.Cwd && !detectedCwd) detectedCwd = cleanArg(tc.args.Cwd);
-              if (tc.args.AbsolutePath && !detectedCwd) detectedCwd = path.dirname(cleanArg(tc.args.AbsolutePath));
+              const cleanArg = (v) => typeof v === 'string' ? v.replace(/^"|"$/g, '').trim().replace(/\\\\/g, '\\') : '';
+              const isNotInternal = (p) => {
+                if (!p || p.length < 3) return false;
+                const lower = p.toLowerCase();
+                return !lower.includes('.gemini') && !lower.includes('antigravity');
+              };
+
+              const dirCandidates = [
+                tc.args.Cwd,
+                tc.args.SearchDirectory,
+                tc.args.DirectoryPath,
+                tc.args.SearchPath
+              ];
+              for (const cand of dirCandidates) {
+                const cleaned = cleanArg(cand);
+                if (isNotInternal(cleaned)) {
+                  detectedCwd = cleaned;
+                  break;
+                }
+              }
+
+              if (!detectedCwd) {
+                const fileCandidates = [tc.args.AbsolutePath, tc.args.TargetFile];
+                for (const cand of fileCandidates) {
+                  const cleaned = cleanArg(cand);
+                  if (isNotInternal(cleaned)) {
+                    detectedCwd = path.dirname(cleaned);
+                    break;
+                  }
+                }
+              }
             }
           }
         }

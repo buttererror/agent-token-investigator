@@ -1,5 +1,6 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { getSessionTimestamp, getTimeRangeBoundary } from '../utils/timeUtils.js';
+import { isWorkspaceMatch } from '../utils/pathUtils.js';
 
 export function useTokenData() {
   const overview = ref(null);
@@ -30,10 +31,10 @@ export function useTokenData() {
     try {
       if (typeof localStorage !== 'undefined') {
         const saved = localStorage.getItem('agent_tracker_agent');
-        if (saved === 'codex' || saved === 'antigravity') return saved;
+        if (saved === 'codex' || saved === 'antigravity' || saved === 'all') return saved;
       }
     } catch {}
-    return 'codex';
+    return 'all';
   };
 
   const getSavedTimeRange = () => {
@@ -56,17 +57,14 @@ export function useTokenData() {
   const filteredSessions = computed(() => {
     let list = sessions.value || [];
     
-    // 1. Strict filter by active agent
-    const currentAgent = activeAgent.value === 'antigravity' ? 'antigravity' : 'codex';
-    list = list.filter(s => (s.agentType || 'codex') === currentAgent);
+    // 1. Filter by active agent
+    if (activeAgent.value && activeAgent.value !== 'all') {
+      list = list.filter(s => (s.agentType || 'codex') === activeAgent.value);
+    }
     
     // 2. Filter by workspace
     if (activeWorkspace.value && activeWorkspace.value !== 'all') {
-      const target = activeWorkspace.value.toLowerCase().replace(/[\/\\]+$/, '');
-      list = list.filter(s => {
-        const cwd = (s.meta?.cwd || '').toLowerCase().replace(/[\/\\]+$/, '');
-        return cwd.startsWith(target) || target.startsWith(cwd);
-      });
+      list = list.filter(s => isWorkspaceMatch(s.meta?.cwd, activeWorkspace.value));
     }
 
     // 3. Filter by timeRange
@@ -81,6 +79,7 @@ export function useTokenData() {
       return sTime >= boundary.startTime && sTime <= boundary.endTime;
     });
   });
+
   const filteredOverview = computed(() => {
     const list = filteredSessions.value || [];
     if (!list.length) {
@@ -384,7 +383,7 @@ export function useTokenData() {
   }
 
   function setAgent(type) {
-    if (type !== 'codex' && type !== 'antigravity') return;
+    if (type !== 'codex' && type !== 'antigravity' && type !== 'all') return;
     activeAgent.value = type;
     try {
       if (typeof localStorage !== 'undefined') {
@@ -420,6 +419,7 @@ export function useTokenData() {
         pacingParams.set('workspace', activeWorkspace.value);
         overviewParams.set('workspace', activeWorkspace.value);
       }
+
       const [overviewRes, sessionsRes, pacingRes, glossaryRes, projectsRes] = await Promise.all([
         fetch(`/api/overview?${overviewParams}`),
         fetch('/api/sessions'),

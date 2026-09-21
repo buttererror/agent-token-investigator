@@ -52,6 +52,7 @@ export function inspectDirectory(dirPath) {
   let isNode = false;
   let isGit = fs.existsSync(path.join(normalized, '.git'));
   let hasAgentsMd = fs.existsSync(path.join(normalized, 'AGENTS.md'));
+  let hasAgentsDir = fs.existsSync(path.join(normalized, '.agents'));
   let isPython = fs.existsSync(path.join(normalized, 'pyproject.toml')) || fs.existsSync(path.join(normalized, 'requirements.txt'));
   let isRust = fs.existsSync(path.join(normalized, 'Cargo.toml'));
   let isGo = fs.existsSync(path.join(normalized, 'go.mod'));
@@ -72,7 +73,8 @@ export function inspectDirectory(dirPath) {
     name,
     description,
     isGit,
-    hasAgentsMd,
+    hasAgentsMd: hasAgentsMd || hasAgentsDir,
+    hasAgentsDir,
     isNode,
     isPython,
     isRust,
@@ -124,6 +126,53 @@ export function removeCustomProject(dirPath) {
   return { success: true, count: filtered.length };
 }
 
+export function getAvailableDrives() {
+  const drives = [];
+  if (process.platform === 'win32') {
+    for (let i = 65; i <= 90; i++) {
+      const letter = String.fromCharCode(i);
+      const drivePath = `${letter}:\\`;
+      try {
+        if (fs.existsSync(drivePath)) {
+          drives.push(drivePath);
+        }
+      } catch {}
+    }
+  } else {
+    drives.push('/');
+  }
+  return drives;
+}
+
+export function discoverProjectsAtRoot(rootDir = null) {
+  const targetDir = rootDir ? path.resolve(rootDir) : path.dirname(process.cwd());
+  const discovered = [];
+  if (!fs.existsSync(targetDir) || !fs.statSync(targetDir).isDirectory()) {
+    return discovered;
+  }
+
+  try {
+    const items = fs.readdirSync(targetDir, { withFileTypes: true });
+    for (const item of items) {
+      if (item.name.startsWith('.') && item.name !== '.agents') continue;
+      if (item.name === 'node_modules' || item.name === 'dist') continue;
+      if (item.isDirectory() || item.isSymbolicLink()) {
+        const full = path.join(targetDir, item.name);
+        try {
+          const inspected = inspectDirectory(full);
+          if (inspected.exists && (inspected.isGit || inspected.isNode || inspected.hasAgentsMd || inspected.isPython || inspected.isRust || inspected.isGo)) {
+            discovered.push(inspected);
+          }
+        } catch {}
+      }
+    }
+  } catch (err) {
+    console.error('Error discovering projects at root:', err);
+  }
+
+  return discovered;
+}
+
 export function browseDirectory(targetPath) {
   const homeDir = os.homedir();
   let resolvedPath = targetPath ? path.resolve(targetPath) : homeDir;
@@ -134,6 +183,13 @@ export function browseDirectory(targetPath) {
 
   const parentPath = path.dirname(resolvedPath) !== resolvedPath ? path.dirname(resolvedPath) : null;
   const entries = [];
+  const drives = getAvailableDrives();
+
+  const currentIsProject = fs.existsSync(path.join(resolvedPath, 'package.json')) ||
+                           fs.existsSync(path.join(resolvedPath, '.git')) ||
+                           fs.existsSync(path.join(resolvedPath, 'AGENTS.md')) ||
+                           fs.existsSync(path.join(resolvedPath, '.agents')) ||
+                           fs.existsSync(path.join(resolvedPath, 'pyproject.toml'));
 
   try {
     const dirItems = fs.readdirSync(resolvedPath, { withFileTypes: true });
@@ -151,8 +207,11 @@ export function browseDirectory(targetPath) {
           const hasPkg = fs.existsSync(path.join(fullItemPath, 'package.json'));
           const hasGit = fs.existsSync(path.join(fullItemPath, '.git'));
           const hasAgents = fs.existsSync(path.join(fullItemPath, 'AGENTS.md'));
+          const hasAgentsDir = fs.existsSync(path.join(fullItemPath, '.agents'));
           const hasPy = fs.existsSync(path.join(fullItemPath, 'pyproject.toml')) || fs.existsSync(path.join(fullItemPath, 'requirements.txt'));
-          const isProject = hasPkg || hasGit || hasAgents || hasPy;
+          const hasCargo = fs.existsSync(path.join(fullItemPath, 'Cargo.toml'));
+          const hasGo = fs.existsSync(path.join(fullItemPath, 'go.mod'));
+          const isProject = hasPkg || hasGit || hasAgents || hasAgentsDir || hasPy || hasCargo || hasGo;
 
           entries.push({
             name: item.name,
@@ -160,7 +219,10 @@ export function browseDirectory(targetPath) {
             isProject,
             hasGit,
             hasPkg,
-            hasAgents
+            hasAgents: hasAgents || hasAgentsDir,
+            hasPy,
+            hasCargo,
+            hasGo
           });
         } catch {}
       }
@@ -179,6 +241,8 @@ export function browseDirectory(targetPath) {
     currentPath: resolvedPath,
     parentPath,
     homePath: homeDir,
+    currentIsProject,
+    drives,
     items: entries
   };
 }

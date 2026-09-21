@@ -46,7 +46,8 @@ const emit = defineEmits([
   'open-linter',
   'open-benchmark',
   'open-guidance-records',
-  'open-issues'
+  'open-issues',
+  'open-project-picker'
 ]);
 
 const isToolsOpen = ref(false);
@@ -75,6 +76,11 @@ function onAgentChange(e) {
 }
 
 function onWorkspaceChange(e) {
+  if (e.target.value === '__add_project__') {
+    e.target.value = props.activeWorkspace;
+    emit('open-project-picker');
+    return;
+  }
   emit('change-workspace', e.target.value);
 }
 
@@ -120,7 +126,7 @@ function onTimeRangeChange(e) {
         </nav>
       </div>
 
-      <!-- Scope Controls & Status -->
+      <!-- Controls: Agent Switcher, Project Scope, Time Range, Sync & Tools -->
       <div class="header-controls">
         <!-- Agent Switcher Dropdown -->
         <div class="scope-dropdown-wrap">
@@ -135,13 +141,14 @@ function onTimeRangeChange(e) {
               class="scope-select"
               @change="onAgentChange"
             >
-              <option value="codex">Codex</option>
+              <option value="all">All Agents</option>
               <option value="antigravity">Antigravity</option>
+              <option value="codex">Codex</option>
             </select>
           </div>
         </div>
 
-        <!-- Project Selector Dropdown -->
+        <!-- Project Selector Dropdown & Picker -->
         <div class="scope-dropdown-wrap">
           <label class="sr-only" for="project-select">Project Scope</label>
           <div class="scope-select-pill">
@@ -168,7 +175,19 @@ function onTimeRangeChange(e) {
               >
                 {{ activeWorkspace }}
               </option>
+              <option value="__add_project__">➕ Pick / Add project...</option>
             </select>
+            <button 
+              type="button" 
+              class="pill-add-btn" 
+              @click.stop="$emit('open-project-picker')" 
+              title="Pick and add local project directory from computer"
+              aria-label="Pick and add project"
+            >
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 3v10M3 8h10" stroke-linecap="round"/>
+              </svg>
+            </button>
           </div>
         </div>
 
@@ -409,6 +428,31 @@ function onTimeRangeChange(e) {
   text-overflow: ellipsis;
   overflow: hidden;
   white-space: nowrap;
+}
+
+.pill-add-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--dashboard-text-muted);
+  cursor: pointer;
+  padding: 3px;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+  flex-shrink: 0;
+  margin-left: -2px;
+}
+
+.pill-add-btn:hover {
+  color: var(--dashboard-cyan);
+  background: rgba(45, 202, 245, 0.15);
+}
+
+.pill-add-btn svg {
+  width: 13px;
+  height: 13px;
 }
 
 .scope-select option {

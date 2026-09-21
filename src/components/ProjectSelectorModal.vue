@@ -215,6 +215,18 @@ onMounted(() => {
             >
               🏠 Home
             </button>
+            <span v-if="browseData.drives && browseData.drives.length > 1" class="drive-group">
+              <button 
+                v-for="d in browseData.drives" 
+                :key="d"
+                :class="['btn-nav btn-sm', { 'btn-active-drive': currentBrowsePath.toLowerCase().startsWith(d.toLowerCase()) }]"
+                :disabled="isBrowsing"
+                @click="fetchDirectory(d)"
+                :title="`Switch to drive ${d}`"
+              >
+                💾 {{ d }}
+              </button>
+            </span>
             <span class="current-path-pill mono" :title="currentBrowsePath">
               {{ currentBrowsePath }}
             </span>
@@ -257,6 +269,9 @@ onMounted(() => {
                   <span v-if="item.hasPkg" class="badge-tag node">Node</span>
                   <span v-if="item.hasGit" class="badge-tag git">Git</span>
                   <span v-if="item.hasAgents" class="badge-tag agents">AGENTS.md</span>
+                  <span v-if="item.hasPy" class="badge-tag python">Python</span>
+                  <span v-if="item.hasCargo" class="badge-tag rust">Rust</span>
+                  <span v-if="item.hasGo" class="badge-tag go">Go</span>
                 </div>
               </div>
 
@@ -623,6 +638,28 @@ onMounted(() => {
 .badge-tag.python {
   background: rgba(56, 189, 248, 0.15);
   color: var(--accent-blue);
+}
+
+.badge-tag.rust {
+  background: rgba(249, 115, 22, 0.15);
+  color: #f97316;
+}
+
+.badge-tag.go {
+  background: rgba(6, 182, 212, 0.15);
+  color: #06b6d4;
+}
+
+.drive-group {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.btn-active-drive {
+  border-color: var(--dashboard-cyan, #2dcaf5) !important;
+  color: var(--dashboard-cyan, #2dcaf5) !important;
+  background: rgba(45, 202, 245, 0.15) !important;
 }
 
 .dir-item-actions {

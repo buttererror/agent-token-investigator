@@ -10,8 +10,9 @@ import { lintPrompt } from './promptLinterEngine.js';
 import { runVerificationBenchmark } from './benchmarkEngine.js';
 import { logGuidanceChange, getGuidanceRecordsForProject, getTrackedProjects } from './guidanceLogger.js';
 import { generateTurnIssueReport, generateRecommendationIssueReport, generatePacingIssueReport, listTokenIssues, readTokenIssue, deleteTokenIssue, saveTokenIssue } from './tokenIssueGenerator.js';
-import { addCustomProject, removeCustomProject, browseDirectory, inspectDirectory } from './customProjects.js';
+import { addCustomProject, removeCustomProject, browseDirectory, inspectDirectory, discoverProjectsAtRoot } from './customProjects.js';
 import { getSessionTimestamp, getTimeRangeBoundary } from '../src/utils/timeUtils.js';
+import { isWorkspaceMatch } from './pathUtils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -40,11 +41,7 @@ app.get('/api/overview', async (req, res) => {
       sessions = sessions.filter(s => (s.agentType || 'codex') === agent);
     }
     if (workspace && workspace !== 'all') {
-      const target = workspace.toLowerCase().replace(/[\/\\]+$/, '');
-      sessions = sessions.filter(s => {
-        const cwd = (s.meta?.cwd || '').toLowerCase().replace(/[\/\\]+$/, '');
-        return cwd.startsWith(target) || target.startsWith(cwd);
-      });
+      sessions = sessions.filter(s => isWorkspaceMatch(s.meta?.cwd, workspace));
     }
     if (timeRange && timeRange !== 'all') {
       const boundary = getTimeRangeBoundary(timeRange);
@@ -94,11 +91,7 @@ app.get('/api/diagnostics', async (req, res) => {
       sessions = sessions.filter(s => (s.agentType || 'codex') === agent);
     }
     if (workspace && workspace !== 'all') {
-      const target = workspace.toLowerCase().replace(/[\/\\]+$/, '');
-      sessions = sessions.filter(s => {
-        const cwd = (s.meta?.cwd || '').toLowerCase().replace(/[\/\\]+$/, '');
-        return cwd.startsWith(target) || target.startsWith(cwd);
-      });
+      sessions = sessions.filter(s => isWorkspaceMatch(s.meta?.cwd, workspace));
     }
     const overview = await getOverviewMetrics(sessions);
     const result = runDiagnostics(sessions, overview, { scope, date, startHour, sessionId }, targetProjectPath);
@@ -118,11 +111,7 @@ app.get('/api/pacing-forecast', async (req, res) => {
       sessions = sessions.filter(s => (s.agentType || 'codex') === agent);
     }
     if (workspace && workspace !== 'all') {
-      const target = workspace.toLowerCase().replace(/[\/\\]+$/, '');
-      sessions = sessions.filter(s => {
-        const cwd = (s.meta?.cwd || '').toLowerCase().replace(/[\/\\]+$/, '');
-        return cwd.startsWith(target) || target.startsWith(cwd);
-      });
+      sessions = sessions.filter(s => isWorkspaceMatch(s.meta?.cwd, workspace));
     }
     // getOverviewMetrics supplies a Codex-shaped fallback for generic metrics.
     // Pacing must use only a provider snapshot that was actually ingested.
@@ -139,79 +128,107 @@ app.get('/api/pacing-forecast', async (req, res) => {
 app.get('/api/generate-handoff/:id', async (req, res) => {
   try {
     const sessions = await getAllSessions();
-    const session = sessions.find(s => s.sessionId === req.params.id || s.meta.id === req.params.id);
+    const session = sessions.find(s => s.sessionId === req.params.id || s.meta?.id === req.params.id);
     if (!session) {
       return res.status(404).json({ error: 'Session not found' });
     }
-    const handoff = compileSessionHandoff(session);
-    res.json(handoff);
+    const result = compileSessionHandoff(session, sessions);
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// 7. Action 5: Prompt linter
+// 7. Action 5: Prompt Linter & Token Pre-flight Engine
 app.post('/api/lint-prompt', (req, res) => {
   try {
-    const { prompt, targetAgent = 'codex', sessionContext = null } = req.body;
-    if (!prompt) {
+    const { prompt, model, reasoningEffort } = req.body;
+    if (typeof prompt !== 'string') {
       return res.status(400).json({ error: 'Prompt text is required' });
     }
-    const result = lintPrompt(prompt, targetAgent, sessionContext);
+    const result = lintPrompt(prompt, { model, reasoningEffort });
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// 8. Live Verification Benchmark (Sequential vs. Skill)
-app.get('/api/run-benchmark', (req, res) => {
+// 8. Verification benchmark runner (Action Verification)
+app.post('/api/run-benchmark', (req, res) => {
   try {
-    const { targetProjectPath = process.cwd(), contextSize = 174500 } = req.query;
-    const results = runVerificationBenchmark(targetProjectPath, parseInt(contextSize, 10) || 174500);
-    res.json(results);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// 9. Action 1: Apply rule to AGENTS.md
-app.post('/api/apply-agents-rule', (req, res) => {
-  try {
-    const { targetProjectPath = process.cwd(), ruleText, what, why, how, author } = req.body;
-    const result = applyAgentsRule(targetProjectPath, ruleText, { what, why, how, author });
+    const { actionType, prompt, command } = req.body;
+    const result = runVerificationBenchmark({ actionType, prompt, command });
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// 9. Action 2: Apply script to package.json
-app.post('/api/apply-package-script', (req, res) => {
+// 9. One-click Action Applier Endpoints
+app.post('/api/actions/apply-agents-rule', (req, res) => {
   try {
-    const { targetProjectPath = process.cwd(), scriptName, scriptCommand, what, why, how, author } = req.body;
-    const result = applyPackageScript(targetProjectPath, scriptName, scriptCommand, { what, why, how, author });
+    const { rule, category, targetDir } = req.body;
+    const result = applyAgentsRule(rule, category, targetDir);
+    logGuidanceChange({
+      projectPath: targetDir,
+      actionType: 'APPLY_AGENTS_RULE',
+      what: `Injected token rule into AGENTS.md: "${rule.substring(0, 50)}..."`,
+      why: 'Prevent quadratic prompt token inflation across subsequent agent turns',
+      how: 'Added authoritative agent guidance rule section',
+      targetFile: path.join(targetDir || process.cwd(), 'AGENTS.md'),
+      backupId: result.backupId,
+      metadata: { category }
+    });
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// 10. Action 3: Create project skill
-app.post('/api/create-skill', (req, res) => {
+app.post('/api/actions/apply-package-script', (req, res) => {
   try {
-    const { targetProjectPath = process.cwd(), skillName, trigger, instructions, what, why, how, author } = req.body;
-    const result = createProjectSkill(targetProjectPath, skillName, trigger, instructions, { what, why, how, author });
+    const { scriptName, scriptCommand, targetDir } = req.body;
+    const result = applyPackageScript(scriptName, scriptCommand, targetDir);
+    logGuidanceChange({
+      projectPath: targetDir,
+      actionType: 'APPLY_PACKAGE_SCRIPT',
+      what: `Added lean test runner script "${scriptName}" to package.json`,
+      why: 'Suppress verbose test logging and payload noise in agent execution context',
+      how: `Configured script command: "${scriptCommand}"`,
+      targetFile: path.join(targetDir || process.cwd(), 'package.json'),
+      backupId: result.backupId,
+      metadata: { scriptName, scriptCommand }
+    });
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// 11. Guidance Changelog & Records API
+app.post('/api/actions/create-project-skill', (req, res) => {
+  try {
+    const { skillName, skillContent, targetDir } = req.body;
+    const result = createProjectSkill(skillName, skillContent, targetDir);
+    logGuidanceChange({
+      projectPath: targetDir,
+      actionType: 'CREATE_PROJECT_SKILL',
+      what: `Generated progressive-disclosure skill: .agents/skills/${skillName}/SKILL.md`,
+      why: 'Encapsulate multi-turn diagnostic workflow into reusable modular skill',
+      how: 'Created project skill directory and defined SKILL.md specification',
+      targetFile: path.join(targetDir || process.cwd(), '.agents', 'skills', skillName, 'SKILL.md'),
+      backupId: result.backupId,
+      metadata: { skillName }
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 10. Guidance Changelog & Tracked Projects API
 app.get('/api/guidance-records', (req, res) => {
   try {
-    const { projectPath = 'all' } = req.query;
+    const { projectPath } = req.query;
     const records = getGuidanceRecordsForProject(projectPath);
     res.json(records);
   } catch (err) {
@@ -221,27 +238,13 @@ app.get('/api/guidance-records', (req, res) => {
 
 app.post('/api/guidance-records', (req, res) => {
   try {
-    const { projectPath, actionType = 'MANUAL_GUIDANCE_EDIT', what, why, how, targetFile, author, diff } = req.body;
-    if (!what || !why || !how) {
-      return res.status(400).json({ error: 'what, why, and how are required fields for guidance records' });
-    }
-    const record = logGuidanceChange({
-      projectPath,
-      actionType,
-      what,
-      why,
-      how,
-      targetFile,
-      author,
-      diff
-    });
+    const record = logGuidanceChange(req.body);
     res.json(record);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// 12. Tracked Projects Selector API
 app.get('/api/projects', async (req, res) => {
   try {
     const projects = await getTrackedProjects();
@@ -251,13 +254,14 @@ app.get('/api/projects', async (req, res) => {
   }
 });
 
+// 11. Custom Projects & Directory Browser Endpoints
 app.post('/api/projects', (req, res) => {
   try {
-    const { path: dirPath, name } = req.body;
+    const { path: dirPath, name: customName } = req.body;
     if (!dirPath) {
       return res.status(400).json({ error: 'Directory path is required' });
     }
-    const project = addCustomProject(dirPath, name);
+    const project = addCustomProject(dirPath, customName);
     res.json(project);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -297,6 +301,16 @@ app.get('/api/inspect-directory', (req, res) => {
     res.json(result);
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/discover-projects', (req, res) => {
+  try {
+    const { root } = req.query;
+    const result = discoverProjectsAtRoot(root);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -375,8 +389,9 @@ app.get('/api/token-issues/read', (req, res) => {
   try {
     const { projectPath = process.cwd(), fileName } = req.query;
     if (!fileName) return res.status(400).json({ error: 'fileName is required' });
-    const content = readTokenIssue(projectPath, fileName);
-    res.json({ content });
+    const file = readTokenIssue(projectPath, fileName);
+    if (!file) return res.status(404).json({ error: 'Issue report not found' });
+    res.json(file);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
